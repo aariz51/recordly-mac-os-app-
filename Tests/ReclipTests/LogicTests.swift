@@ -198,6 +198,53 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class TimelineModelTests: XCTestCase {
+    func testSpansOverlap() {
+        XCTAssertTrue(TimelineModel.spansOverlap(.init(start: 0, end: 5), .init(start: 3, end: 8)))
+        XCTAssertFalse(TimelineModel.spansOverlap(.init(start: 0, end: 5), .init(start: 5, end: 8)), "touching edges don't overlap")
+        XCTAssertFalse(TimelineModel.spansOverlap(.init(start: 6, end: 9), .init(start: 0, end: 5)))
+    }
+
+    func testNormalizeRegionSpan() {
+        // Normal case within bounds.
+        XCTAssertEqual(TimelineModel.normalizeRegionSpan(startMs: 100, endMs: 400, totalMs: 1000, minDurationMs: 50),
+                       .init(start: 100, end: 400))
+        // Start past total is pulled back so min-duration still fits.
+        XCTAssertEqual(TimelineModel.normalizeRegionSpan(startMs: 990, endMs: 995, totalMs: 1000, minDurationMs: 100),
+                       .init(start: 900, end: 1000))
+        // End below start+min is pushed to satisfy min duration.
+        XCTAssertEqual(TimelineModel.normalizeRegionSpan(startMs: 200, endMs: 210, totalMs: 1000, minDurationMs: 100),
+                       .init(start: 200, end: 300))
+        // Negative start clamps to 0.
+        XCTAssertEqual(TimelineModel.normalizeRegionSpan(startMs: -50, endMs: 300, totalMs: 1000, minDurationMs: 50).start, 0)
+    }
+
+    func testFormatPlayheadTime() {
+        XCTAssertEqual(TimelineModel.formatPlayheadTime(ms: 5300), "5.3s")
+        XCTAssertEqual(TimelineModel.formatPlayheadTime(ms: 65300), "1:05.3")
+        XCTAssertEqual(TimelineModel.formatPlayheadTime(ms: 0), "0.0s")
+    }
+
+    func testFormatTimeLabel() {
+        XCTAssertEqual(TimelineModel.formatTimeLabel(ms: 125_000, intervalMs: 1000), "2:05")       // no fraction
+        XCTAssertEqual(TimelineModel.formatTimeLabel(ms: 125_250, intervalMs: 100), "2:05.25")     // 2 digits
+        XCTAssertEqual(TimelineModel.formatTimeLabel(ms: 125_200, intervalMs: 500), "2:05.2")      // 1 digit
+        XCTAssertEqual(TimelineModel.formatTimeLabel(ms: 3_725_000, intervalMs: 1000), "1:02:05")  // hours
+    }
+
+    func testTrackRowIds() {
+        XCTAssertEqual(TimelineModel.annotationTrackRowId(2), "row-annotation-2")
+        XCTAssertTrue(TimelineModel.isAnnotationTrackRowId("row-annotation-2"))
+        XCTAssertTrue(TimelineModel.isAnnotationTrackRowId("row-annotation"))
+        XCTAssertFalse(TimelineModel.isAnnotationTrackRowId("row-audio-1"))
+        XCTAssertEqual(TimelineModel.annotationTrackIndex("row-annotation-3"), 3)
+        XCTAssertEqual(TimelineModel.annotationTrackIndex("row-annotation"), 0)
+        XCTAssertEqual(TimelineModel.audioTrackRowId(1), "row-audio-1")
+        XCTAssertEqual(TimelineModel.audioTrackIndex("row-audio-4"), 4)
+        XCTAssertTrue(TimelineModel.isAudioTrackRowId("row-audio"))
+    }
+}
+
 final class ZoomTransformTests: XCTestCase {
     let stage = ZoomTransform.Size(width: 1000, height: 1000)
     let mask = ZoomTransform.Rect(x: 0, y: 0, width: 1000, height: 1000)
