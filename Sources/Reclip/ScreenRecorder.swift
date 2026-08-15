@@ -44,6 +44,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private var wallStart: Date?
 
     private let sampleQueue = DispatchQueue(label: "com.aariz51.reclip.sample")
+    private let cursorSampler = CursorSampler()
     private(set) var outputURL: URL?
 
     // MARK: - Discovery
@@ -121,6 +122,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         try await stream.startCapture()
         isRecording = true
         wallStart = Date()
+        cursorSampler.start()
         startElapsedTimer()
     }
 
@@ -128,6 +130,9 @@ final class ScreenRecorder: NSObject, ObservableObject {
         guard isRecording, let stream else { throw RecorderError.notRecording }
         try await stream.stopCapture()
         self.stream = nil
+
+        let track = cursorSampler.stop()
+        if let url = outputURL { track.save(besides: url) }
 
         videoInput?.markAsFinished()
         systemAudioInput?.markAsFinished()

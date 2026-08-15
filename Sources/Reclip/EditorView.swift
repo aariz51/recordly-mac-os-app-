@@ -6,6 +6,10 @@ struct EditorView: View {
     var onClose: () -> Void
 
     @State private var style = StyleOptions()
+    @State private var zoom = ZoomTimeline()
+    @State private var autoZoom = false
+    @State private var cursorTrack: CursorTrack?
+    @State private var duration: Double = 0
     @State private var player = AVPlayer()
     @State private var playerItem: AVPlayerItem?
     @State private var isExporting = false
@@ -55,6 +59,14 @@ struct EditorView: View {
             slider("Corner radius", value: $style.cornerRadiusFraction, range: 0...0.06)
             slider("Shadow", value: $style.shadowOpacity, range: 0...0.7)
 
+            Toggle("Auto-zoom (follow cursor)", isOn: $autoZoom)
+                .disabled(cursorTrack == nil)
+                .onChange(of: autoZoom) { updateZoom(); Task { await rebuild() } }
+            if cursorTrack == nil {
+                Text("No cursor data for this clip (record in Reclip to enable auto-zoom).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
             Divider()
 
             Button {
@@ -94,10 +106,21 @@ struct EditorView: View {
 
     // MARK: - Composition
 
+    private func updateZoom() {
+        guard autoZoom, let track = cursorTrack, duration > 0 else {
+            zoom = ZoomTimeline()
+            return
+        }
+        zoom = ZoomTimeline.autoZoom(from: track, duration: duration)
+    }
+
     private func rebuild() async {
         let asset = AVURLAsset(url: sourceURL)
         do {
-            let composition = try await StyledExport.makeComposition(for: asset, style: style)
+            if cursorTrack == nil { cursorTrack = CursorTrack.load(besides: sourceURL) }
+            if duration == 0 { duration = (try? await asset.load(.duration))?.seconds ?? 0 }
+            updateZoom()
+            let composition = try await StyledExport.makeComposition(for: asset, style: style, zoom: zoom)
             let item = AVPlayerItem(asset: asset)
             item.videoComposition = composition
             playerItem = item
@@ -115,7 +138,7 @@ struct EditorView: View {
         status = "Rendering…"
         let out = sourceURL.deletingPathExtension().appendingPathExtension("styled.mp4")
         do {
-            try await StyledExport.export(source: sourceURL, to: out, style: style)
+            try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom)
             exportedURL = out
             status = "Saved \(out.lastPathComponent)"
         } catch {

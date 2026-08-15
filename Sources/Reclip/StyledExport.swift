@@ -44,7 +44,9 @@ enum StyledExportError: LocalizedError {
 enum StyledExport {
 
     /// Builds a styled Core Image composition for both live preview and export.
-    static func makeComposition(for asset: AVAsset, style: StyleOptions) async throws -> AVMutableVideoComposition {
+    static func makeComposition(for asset: AVAsset,
+                                style: StyleOptions,
+                                zoom: ZoomTimeline = ZoomTimeline()) async throws -> AVMutableVideoComposition {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw StyledExportError.noVideoTrack
         }
@@ -60,7 +62,9 @@ enum StyledExport {
         let background = makeBackground(style.background, size: size)
 
         let composition = AVMutableVideoComposition(asset: asset) { request in
-            let composed = compose(source: request.sourceImage,
+            let z = zoom.value(at: request.compositionTime.seconds)
+            let zoomed = applyZoom(request.sourceImage, scale: z.scale, focus: z.focus, canvas: size)
+            let composed = compose(source: zoomed,
                                    background: background,
                                    canvas: size,
                                    padding: padding,
@@ -74,11 +78,24 @@ enum StyledExport {
         return composition
     }
 
+    /// Scales the frame around a normalized (top-left origin) focus point, keeping the original extent.
+    private static func applyZoom(_ image: CIImage, scale: CGFloat, focus: CGPoint, canvas: CGSize) -> CIImage {
+        guard scale > 1.0001 else { return image }
+        let extent = image.extent
+        let fx = extent.minX + focus.x * extent.width
+        let fy = extent.minY + (1.0 - focus.y) * extent.height   // top-left -> CI bottom-left
+        let t = CGAffineTransform(translationX: fx, y: fy)
+            .scaledBy(x: scale, y: scale)
+            .translatedBy(x: -fx, y: -fy)
+        return image.transformed(by: t).cropped(to: extent)
+    }
+
     static func export(source: URL,
                        to output: URL,
-                       style: StyleOptions) async throws {
+                       style: StyleOptions,
+                       zoom: ZoomTimeline = ZoomTimeline()) async throws {
         let asset = AVURLAsset(url: source)
-        let composition = try await makeComposition(for: asset, style: style)
+        let composition = try await makeComposition(for: asset, style: style, zoom: zoom)
 
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
             throw StyledExportError.exportSessionFailed("could not create export session")
