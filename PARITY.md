@@ -15,14 +15,14 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 ## 1. Recording / capture
 | Feature | Reclip | Note |
 |---|---|---|
-| Full display capture | ✅ | ScreenRecorder |
+| Full display capture | ✅ | ScreenRecorder — **end-to-end verified on-device** (real 3s recording → valid MP4); fixed a frame-status bug that was producing damaged files |
 | Multi-monitor selection | ✅ | availableDisplays |
 | Single-window capture | ✅ | CaptureSource.window |
 | Own-window exclusion | 🟡 | not filtered |
 | Source thumbnails + app icons | ❌ | picker is text-only |
 | Native backend (mac SCK) | ✅ | ScreenCaptureKit |
 | Target 60fps / retina | ✅ | config |
-| **Pause / Resume recording** | ✅ | `RecordingClock` (Recordly's accumulated-paused-duration model) + frame-drop pause, wired into ScreenRecorder; clock math unit-tested |
+| **Pause / Resume recording** | ✅ | `RecordingClock` + frame-drop pause, wired into ScreenRecorder; **verified in a real recording** (integration test drives start→pause→resume→stop → valid video) |
 | **Cancel (discard) recording** | 🟡 | clock.reset landed; UI discard action pending |
 | Live REC timer | ✅ | elapsed, now backed by RecordingClock |
 | **Countdown timer (3/5/10s)** | ✅ | `Countdown` model (remaining/finished) unit-tested; UI hookup pending |
