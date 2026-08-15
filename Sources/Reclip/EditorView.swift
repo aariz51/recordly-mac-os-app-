@@ -13,6 +13,9 @@ struct EditorView: View {
     @State private var duration: Double = 0
     @State private var trimStart: Double = 0
     @State private var trimEnd: Double = 0
+    @State private var webcamFrames = WebcamFrames()
+    @State private var webcamLoaded = false
+    @State private var webcam = WebcamSettings()
     @State private var player = AVPlayer()
     @State private var playerItem: AVPlayerItem?
     @State private var isExporting = false
@@ -78,6 +81,20 @@ struct EditorView: View {
                 }
             }
 
+            Toggle("Webcam bubble", isOn: $webcam.enabled)
+                .disabled(webcamFrames.isEmpty)
+                .onChange(of: webcam.enabled) { Task { await rebuild() } }
+            if !webcamFrames.isEmpty && webcam.enabled {
+                Picker("Position", selection: $webcam.corner) {
+                    ForEach(WebcamSettings.Corner.allCases) { Text($0.rawValue).tag($0) }
+                }
+                .onChange(of: webcam.corner) { Task { await rebuild() } }
+                slider("Webcam size", value: $webcam.sizeFraction, range: 0.12...0.35)
+            } else if webcamFrames.isEmpty {
+                Text("No webcam footage for this clip.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
             Divider()
 
             Button {
@@ -137,12 +154,17 @@ struct EditorView: View {
         let asset = AVURLAsset(url: sourceURL)
         do {
             if cursorTrack == nil { cursorTrack = CursorTrack.load(besides: sourceURL) }
+            if !webcamLoaded {
+                webcamFrames = await WebcamOverlay.load(for: sourceURL)
+                webcamLoaded = true
+            }
             if duration == 0 {
                 duration = (try? await asset.load(.duration))?.seconds ?? 0
                 if trimEnd == 0 { trimEnd = duration }
             }
             updateZoom()
-            let composition = try await StyledExport.makeComposition(for: asset, style: style, zoom: zoom)
+            let composition = try await StyledExport.makeComposition(
+                for: asset, style: style, zoom: zoom, webcam: webcamFrames, webcamSettings: webcam)
             let item = AVPlayerItem(asset: asset)
             item.videoComposition = composition
             playerItem = item
@@ -172,9 +194,11 @@ struct EditorView: View {
         }
         do {
             if asGif {
-                try await GifExport.export(source: sourceURL, to: out, style: style, zoom: zoom, trim: trim)
+                try await GifExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
+                                           trim: trim, webcam: webcamFrames, webcamSettings: webcam)
             } else {
-                try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom, trim: trim)
+                try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
+                                              trim: trim, webcam: webcamFrames, webcamSettings: webcam)
             }
             exportedURL = out
             status = "Saved \(out.lastPathComponent)"

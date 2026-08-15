@@ -46,7 +46,9 @@ enum StyledExport {
     /// Builds a styled Core Image composition for both live preview and export.
     static func makeComposition(for asset: AVAsset,
                                 style: StyleOptions,
-                                zoom: ZoomTimeline = ZoomTimeline()) async throws -> AVMutableVideoComposition {
+                                zoom: ZoomTimeline = ZoomTimeline(),
+                                webcam: WebcamFrames = WebcamFrames(),
+                                webcamSettings: WebcamSettings = WebcamSettings()) async throws -> AVMutableVideoComposition {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw StyledExportError.noVideoTrack
         }
@@ -72,7 +74,12 @@ enum StyledExport {
                                    shadowOpacity: style.shadowOpacity,
                                    shadowRadius: style.shadowRadius,
                                    context: ciContext)
-            request.finish(with: composed, context: nil)
+            let withCam = WebcamOverlay.composite(base: composed,
+                                                  canvas: size,
+                                                  webcam: webcam,
+                                                  time: request.compositionTime.seconds,
+                                                  settings: webcamSettings)
+            request.finish(with: withCam, context: nil)
         }
         composition.renderSize = size
         return composition
@@ -94,9 +101,12 @@ enum StyledExport {
                        to output: URL,
                        style: StyleOptions,
                        zoom: ZoomTimeline = ZoomTimeline(),
-                       trim: CMTimeRange? = nil) async throws {
+                       trim: CMTimeRange? = nil,
+                       webcam: WebcamFrames = WebcamFrames(),
+                       webcamSettings: WebcamSettings = WebcamSettings()) async throws {
         let asset = AVURLAsset(url: source)
-        let composition = try await makeComposition(for: asset, style: style, zoom: zoom)
+        let composition = try await makeComposition(for: asset, style: style, zoom: zoom,
+                                                    webcam: webcam, webcamSettings: webcamSettings)
 
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
             throw StyledExportError.exportSessionFailed("could not create export session")

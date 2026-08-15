@@ -12,10 +12,13 @@ enum GifExport {
                        style: StyleOptions,
                        zoom: ZoomTimeline = ZoomTimeline(),
                        trim: CMTimeRange? = nil,
+                       webcam: WebcamFrames = WebcamFrames(),
+                       webcamSettings: WebcamSettings = WebcamSettings(),
                        fps: Double = 12,
                        maxWidth: CGFloat = 720) async throws {
         let asset = AVURLAsset(url: source)
-        let composition = try await StyledExport.makeComposition(for: asset, style: style, zoom: zoom)
+        let composition = try await StyledExport.makeComposition(for: asset, style: style, zoom: zoom,
+                                                                 webcam: webcam, webcamSettings: webcamSettings)
 
         let generator = AVAssetImageGenerator(asset: asset)
         generator.videoComposition = composition
