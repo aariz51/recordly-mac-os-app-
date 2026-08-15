@@ -1,12 +1,56 @@
 import Foundation
 import AVFoundation
 
+/// Transcription language (Recordly's 10 options).
+enum WhisperLanguage: String, CaseIterable, Identifiable {
+    case auto, en, es, fr, de, it, pt, zh, ja, ko
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .auto: return "Auto Detect"
+        case .en: return "English";    case .es: return "Spanish"
+        case .fr: return "French";     case .de: return "German"
+        case .it: return "Italian";    case .pt: return "Portuguese"
+        case .zh: return "Chinese";    case .ja: return "Japanese"
+        case .ko: return "Korean"
+        }
+    }
+}
+
+/// A downloadable whisper.cpp model.
+enum WhisperModel: String, CaseIterable, Identifiable {
+    case tiny, base, small
+    var id: String { rawValue }
+    var fileName: String { "ggml-\(rawValue).bin" }
+    var downloadURL: URL {
+        URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-\(rawValue).bin")!
+    }
+    static func modelsDirectory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return base.appendingPathComponent("Reclip/models", isDirectory: true)
+    }
+    var localURL: URL { WhisperModel.modelsDirectory().appendingPathComponent(fileName) }
+    var isDownloaded: Bool { FileManager.default.fileExists(atPath: localURL.path) }
+}
+
 /// Local speech-to-caption transcription via a whisper.cpp binary (MIT). This wires the
 /// pipeline: extract 16 kHz mono audio → run whisper-cli → parse its SRT into cues.
 ///
 /// The parsing and audio-extraction halves are unit-tested. The transcription itself
 /// requires a ggml model + real speech audio, so it is verified on-device, not in CI.
 enum WhisperTranscriber {
+
+    /// Downloads a model into app support if not already present.
+    static func downloadModel(_ model: WhisperModel) async throws -> URL {
+        if model.isDownloaded { return model.localURL }
+        try FileManager.default.createDirectory(at: WhisperModel.modelsDirectory(),
+                                                withIntermediateDirectories: true)
+        let (tmp, _) = try await URLSession.shared.download(from: model.downloadURL)
+        try? FileManager.default.removeItem(at: model.localURL)
+        try FileManager.default.moveItem(at: tmp, to: model.localURL)
+        return model.localURL
+    }
 
     enum WhisperError: LocalizedError {
         case noAudioTrack

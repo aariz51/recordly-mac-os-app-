@@ -179,4 +179,21 @@ final class WhisperTranscriberTests: XCTestCase {
             XCTFail("expected a thrown error for a missing binary")
         } catch { /* expected */ }
     }
+
+    func testLanguageOptions() {
+        XCTAssertEqual(WhisperLanguage.allCases.count, 10)          // Recordly's 10 languages
+        XCTAssertEqual(WhisperLanguage.en.rawValue, "en")
+        XCTAssertEqual(WhisperLanguage.auto.displayName, "Auto Detect")
+        XCTAssertEqual(WhisperLanguage.ja.displayName, "Japanese")
+        // rawValues are unique language codes usable directly as whisper -l args.
+        XCTAssertEqual(Set(WhisperLanguage.allCases.map(\.rawValue)).count, 10)
+    }
+
+    func testModelMappings() {
+        XCTAssertEqual(WhisperModel.allCases.count, 3)
+        XCTAssertEqual(WhisperModel.small.fileName, "ggml-small.bin")
+        XCTAssertTrue(WhisperModel.base.downloadURL.absoluteString.hasSuffix("ggml-base.bin"))
+        XCTAssertTrue(WhisperModel.tiny.downloadURL.absoluteString.hasPrefix("https://"))
+        XCTAssertTrue(WhisperModel.small.localURL.path.hasSuffix("Reclip/models/ggml-small.bin"))
+    }
 }
