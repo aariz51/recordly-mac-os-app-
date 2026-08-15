@@ -63,7 +63,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Text captions | ✅ | Annotations |
 | **Text typography (weight/color/bg toggle+color)** | ✅ | weight, text colour, pill on/off + colour (font-family/align still fixed) |
 | Image annotations | ✅ | Annotation.kind=.image |
-| Arrow annotations (stroke, color) | ✅ | Annotation.kind=.arrow (1 dir; 8-dir TODO) |
+| Arrow annotations (stroke, color, 8-dir) | ✅ | Annotation.kind=.arrow + arrowAngle (any direction) |
 | Blur / censor region | ✅ | Annotation.kind=.blur/.box |
 | **Extra audio regions (volume/normalize)** | ❌ | — |
 
@@ -103,7 +103,7 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 | **Background blur (blurred source)** | ✅ | batch 2 |
 | **Image wallpaper (user upload)** | ✅ | `StyleOptions.backgroundImage` — aspect-filled, persisted in `.reclip` (own JPEGs not copied for licensing) |
 | **Device frames** | ✅ | `DeviceFrameRenderer` — macOS window + browser chrome (traffic lights, address pill) |
-| **Aspect ratio presets (8 + custom)** | 🟡 | 5 presets (batch 2) |
+| **Aspect ratio presets (8 + custom)** | ✅ | 8 ratio presets + Source (custom X/Y still open) |
 | **Advanced per-side / vertical padding** | ✅ | `PaddingInsets` (top/bottom/left/right), content-rect compositing |
 
 ## 7. Auto-captions  🟡 (rendering half landed)
