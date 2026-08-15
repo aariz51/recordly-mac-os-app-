@@ -29,11 +29,42 @@ enum ZoomEasing: String, CaseIterable, Identifiable {
     }
 }
 
+/// The six zoom depth presets (Recordly parity).
+enum ZoomDepth: String, CaseIterable, Identifiable {
+    case subtle = "1.25×"
+    case light = "1.5×"
+    case medium = "1.8×"
+    case strong = "2.2×"
+    case heavy = "3.5×"
+    case max = "5×"
+    var id: String { rawValue }
+    var scale: CGFloat {
+        switch self {
+        case .subtle: return 1.25
+        case .light: return 1.5
+        case .medium: return 1.8
+        case .strong: return 2.2
+        case .heavy: return 3.5
+        case .max: return 5.0
+        }
+    }
+}
+
 /// Evaluates the active zoom (scale + focus) at any time, with eased in/out ramps.
 struct ZoomTimeline: Equatable {
     var regions: [ZoomRegion] = []
     var ramp: Double = 0.5   // seconds to ease in and out
     var easing: ZoomEasing = .smooth
+
+    /// Add a manual zoom region at a chosen depth and focus point.
+    @discardableResult
+    mutating func addRegion(start: Double, end: Double,
+                            depth: ZoomDepth = .strong,
+                            focus: CGPoint = CGPoint(x: 0.5, y: 0.5)) -> ZoomRegion {
+        let region = ZoomRegion(start: start, end: end, scale: depth.scale, focus: focus)
+        regions.append(region)
+        return region
+    }
 
     /// Returns scale (1 = no zoom) and focus point at time `t`.
     func value(at t: Double) -> (scale: CGFloat, focus: CGPoint) {

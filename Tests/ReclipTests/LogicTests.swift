@@ -29,6 +29,16 @@ final class ZoomTimelineTests: XCTestCase {
         }
     }
 
+    func testManualRegionWithDepth() {
+        var tl = ZoomTimeline()
+        tl.addRegion(start: 1, end: 5, depth: .medium, focus: CGPoint(x: 0.3, y: 0.7))
+        XCTAssertEqual(tl.regions.count, 1)
+        let v = tl.value(at: 3)   // mid-region, past the ramp
+        XCTAssertEqual(v.scale, ZoomDepth.medium.scale, accuracy: 0.02)
+        XCTAssertEqual(v.focus.x, 0.3, accuracy: 0.001)
+        XCTAssertEqual(v.focus.y, 0.7, accuracy: 0.001)
+    }
+
     func testFullZoomMidRegion() {
         let tl = ZoomTimeline(regions: [
             ZoomRegion(start: 0, end: 10, scale: 2, focus: CGPoint(x: 0.3, y: 0.4))
