@@ -24,11 +24,17 @@ struct EditorView: View {
     @State private var speed: Double = 1.0
     @State private var player = AVPlayer()
     @State private var isExporting = false
+    @State private var exportProgress: Double?
     @State private var status: Status?
     @State private var exportedURL: URL?
     @State private var playhead: Double = 0
+    @State private var isPlaying = false
     @State private var timeObserver: Any?
     @State private var didLoad = false
+    @State private var appeared = false
+    /// Space is the scrub key everywhere else in video; it must still type a
+    /// space when the caption field has focus.
+    @FocusState private var captionFocused: Bool
     /// Aspect of the rendered composition, so the preview card hugs the video
     /// instead of framing it in black letterbox bars.
     @State private var previewAspect: CGFloat = 16.0 / 9.0
@@ -55,6 +61,15 @@ struct EditorView: View {
                 .frame(width: 320)
         }
         .frame(minWidth: 940, idealWidth: 1060, minHeight: 620, idealHeight: 680)
+        .background {
+            // Space plays and pauses, as it does in every other video tool.
+            // Disabled while the caption field is focused so typing still works.
+            Button("Play or pause preview") { togglePlayback() }
+                .keyboardShortcut(.space, modifiers: [])
+                .disabled(captionFocused)
+                .opacity(0)
+                .accessibilityHidden(true)
+        }
         .task { await firstLoad() }
         .onDisappear {
             if let timeObserver { player.removeTimeObserver(timeObserver) }
@@ -78,7 +93,7 @@ struct EditorView: View {
 
             PlayerStage(player: player)
                 .aspectRatio(previewAspect, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: Radius.stage, style: .continuous))
                 .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
                 .padding(Space.xxl)
 
@@ -96,16 +111,27 @@ struct EditorView: View {
         // Top-trailing, because the window's traffic lights sit over the
         // top-leading corner of the stage.
         .overlay(alignment: .topTrailing) {
-            HStack(spacing: 6) {
-                Image(systemName: "eye")
-                Text("Live preview")
+            // Was a decorative "Live preview" badge. It sat in the one spot the
+            // eye already goes and did nothing — so it became the transport:
+            // it now says whether the preview is running and clicking it stops it.
+            Button(action: togglePlayback) {
+                HStack(spacing: 6) {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                        .contentTransition(.symbolEffect(.replace))
+                    Text(isPlaying ? "Playing" : "Paused")
+                        .contentTransition(.opacity)
+                }
+                .captionType()
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.ultraThinMaterial, in: Capsule())
+                .contentShape(Capsule())
             }
-            .captionType()
-            .foregroundStyle(.white.opacity(0.75))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(.ultraThinMaterial, in: Capsule())
+            .buttonStyle(PressableStyle())
+            .help("Play or pause the preview (Space)")
             .padding(Space.l)
+            .animation(Motion.hover, value: isPlaying)
         }
         .animation(Motion.enter(reduce), value: didLoad)
     }
@@ -118,17 +144,22 @@ struct EditorView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    backgroundSection
-                    frameSection
-                    motionSection
-                    if duration > 0 { timingSection }
-                    webcamSection
-                    captionSection
+                    backgroundSection.stagger(0, appeared: appeared, reduce: reduce)
+                    frameSection.stagger(1, appeared: appeared, reduce: reduce)
+                    motionSection.stagger(2, appeared: appeared, reduce: reduce)
+                    if duration > 0 {
+                        timingSection.stagger(3, appeared: appeared, reduce: reduce)
+                    }
+                    webcamSection.stagger(4, appeared: appeared, reduce: reduce)
+                    captionSection.stagger(5, appeared: appeared, reduce: reduce)
                 }
                 .padding(.horizontal, Space.l)
                 .padding(.top, Space.l)
                 .padding(.bottom, Space.xl)
             }
+            // Content passes under the header and the export bar, so both edges
+            // get a soft fade rather than a hard rule.
+            .scrollEdge(.top, color: Color(nsColor: .windowBackgroundColor), height: 14)
             .scrollEdge(.bottom, color: Color(nsColor: .windowBackgroundColor).opacity(0.9), height: 16)
 
             exportBar
@@ -157,6 +188,7 @@ struct EditorView: View {
             .buttonStyle(ActionButtonStyle(variant: .quiet, fullWidth: false))
             .keyboardShortcut("w", modifiers: .command)
             .help("Close editor (⌘W)")
+            .accessibilityLabel("Close editor")
         }
         .padding(.horizontal, Space.l)
         .padding(.top, Space.l)
@@ -204,12 +236,12 @@ struct EditorView: View {
     private var motionSection: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             SectionHeader(title: "Motion")
-            InspectorToggle(title: "Auto-zoom",
-                            subtitle: cursorTrack == nil
-                                ? "Needs cursor data — record in Reclip to enable."
-                                : "Eases into wherever the cursor is working.",
-                            isOn: $autoZoom,
-                            enabled: cursorTrack != nil) {
+            ToggleRow(title: "Auto-zoom",
+                      subtitle: cursorTrack == nil
+                          ? "Needs cursor data — record in Reclip to enable."
+                          : "Eases into wherever the cursor is working.",
+                      isOn: $autoZoom,
+                      enabled: cursorTrack != nil) {
                 updateZoom()
                 Task { await rebuild() }
             }
@@ -224,7 +256,8 @@ struct EditorView: View {
                 TrimBar(duration: duration,
                         start: $trimStart,
                         end: $trimEnd,
-                        playhead: playhead) {
+                        playhead: playhead,
+                        onScrub: { scrub(toSourceTime: $0) }) {
                     Task { await rebuild() }
                 }
                 Text("\(timeLabel(trimEnd - trimStart)) kept of \(timeLabel(duration))")
@@ -239,10 +272,10 @@ struct EditorView: View {
     private var webcamSection: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             SectionHeader(title: "Webcam")
-            InspectorToggle(title: "Webcam bubble",
-                            subtitle: webcamFrames.isEmpty ? "No webcam footage for this clip." : nil,
-                            isOn: $webcam.enabled,
-                            enabled: !webcamFrames.isEmpty) {
+            ToggleRow(title: "Webcam bubble",
+                      subtitle: webcamFrames.isEmpty ? "No webcam footage for this clip." : nil,
+                      isOn: $webcam.enabled,
+                      enabled: !webcamFrames.isEmpty) {
                 Task { await rebuild() }
             }
 
@@ -274,6 +307,7 @@ struct EditorView: View {
             HStack(spacing: Space.s) {
                 TextField("Caption at \(timeLabel(playhead))", text: $newCaption)
                     .textFieldStyle(.roundedBorder)
+                    .focused($captionFocused)
                     .onSubmit(addCaption)
                 Button("Add", action: addCaption)
                     .buttonStyle(ActionButtonStyle(variant: .secondary, fullWidth: false))
@@ -301,11 +335,13 @@ struct EditorView: View {
                                 .font(.system(size: 10, weight: .semibold))
                         }
                         .buttonStyle(ActionButtonStyle(variant: .quiet, fullWidth: false))
+                        .help("Delete this caption")
+                        .accessibilityLabel("Delete caption \(a.text)")
                     }
                     .padding(.vertical, 4)
                     .padding(.horizontal, Space.s)
                     .background(Color.primary.opacity(0.05),
-                                in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                in: RoundedRectangle(cornerRadius: Radius.inset, style: .continuous))
                     .transition(.row(reduce))
                 }
             }
@@ -327,7 +363,9 @@ struct EditorView: View {
                         ProgressView()
                             .controlSize(.small)
                             .tint(.white)
-                        Text("Rendering…")
+                        Text(exportProgress.map { "Rendering \(Int($0 * 100))%" } ?? "Rendering…")
+                            .contentTransition(.numericText())
+                            .monospacedDigit()
                     }
                 } else {
                     Label("Export MP4", systemImage: "square.and.arrow.up")
@@ -336,6 +374,11 @@ struct EditorView: View {
             .buttonStyle(ActionButtonStyle(variant: .prominent))
             .disabled(isExporting)
             .keyboardShortcut("e", modifiers: .command)
+
+            if isExporting {
+                ProgressTrack(fraction: exportProgress)
+                    .transition(.opacity)
+            }
 
             HStack(spacing: Space.s) {
                 Button { Task { await export(asGif: true) } } label: {
@@ -358,6 +401,7 @@ struct EditorView: View {
         .animation(Motion.enter(reduce), value: isExporting)
         .animation(Motion.enter(reduce), value: status)
         .animation(Motion.enter(reduce), value: exportedURL)
+        .animation(Motion.progress, value: exportProgress)
     }
 
     // MARK: - Composition
@@ -384,6 +428,27 @@ struct EditorView: View {
         observePlayhead()
         await rebuild()
         didLoad = true
+        withAnimation(Motion.enter(reduce)) { appeared = true }
+    }
+
+    private func togglePlayback() {
+        if player.rate > 0 { player.pause() } else { player.play() }
+        isPlaying = player.rate > 0
+    }
+
+    /// Drives the preview from a trim handle while it is being dragged. Seeking
+    /// is cheap; rebuilding the composition is not — so the frame follows the
+    /// grip continuously and the render waits for the release.
+    private func scrub(toSourceTime source: Double) {
+        player.pause()
+        isPlaying = false
+        // The composition starts at the trim-in point, so source time has to be
+        // mapped back into the output timeline the player is actually running.
+        let out = max(source - trimStart, 0) / max(speed, 0.01)
+        Task { @MainActor in
+            await player.seek(to: CMTime(seconds: out, preferredTimescale: 600),
+                              toleranceBefore: .zero, toleranceAfter: .zero)
+        }
     }
 
     /// Playback position, mapped back into source time so the trim bar's
@@ -397,6 +462,8 @@ struct EditorView: View {
             let out = time.seconds
             guard out.isFinite else { return }
             playhead = trimStart + out * speed
+            let running = player.rate > 0
+            if running != isPlaying { isPlaying = running }
         }
     }
 
@@ -455,20 +522,24 @@ struct EditorView: View {
 
     private func export(asGif: Bool = false) async {
         isExporting = true
+        exportProgress = nil
         exportedURL = nil
         status = Status(.status, asGif ? "Rendering GIF…" : "Rendering MP4…")
         let out = sourceURL.deletingPathExtension()
             .appendingPathExtension(asGif ? "styled.gif" : "styled.mp4")
         let trim = currentTrim()
+        let report: @Sendable (Double) -> Void = { value in
+            Task { @MainActor in exportProgress = value }
+        }
         do {
             if asGif {
                 try await GifExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
                                            trim: trim, webcam: webcamFrames, webcamSettings: webcam,
-                                           annotations: annotations, speed: speed)
+                                           annotations: annotations, speed: speed, progress: report)
             } else {
                 try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
                                               trim: trim, webcam: webcamFrames, webcamSettings: webcam,
-                                              annotations: annotations, speed: speed)
+                                              annotations: annotations, speed: speed, progress: report)
             }
             exportedURL = out
             status = Status(.success, "Saved \(out.lastPathComponent)")
@@ -476,5 +547,6 @@ struct EditorView: View {
             status = Status(.error, "Export failed: \(error.localizedDescription)")
         }
         isExporting = false
+        exportProgress = nil
     }
 }

@@ -76,7 +76,7 @@ struct ContentView: View {
     private var header: some View {
         HStack(alignment: .center, spacing: Space.m) {
             ZStack {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.badge, style: .continuous)
                     .fill(
                         LinearGradient(colors: [Palette.accent, Palette.accent.opacity(0.72)],
                                        startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -206,19 +206,19 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: Space.s) {
             SectionHeader(title: "Capture")
 
-            toggleRow(icon: "speaker.wave.2.fill",
+            ToggleRow(icon: "speaker.wave.2.fill",
                       title: "System audio",
                       subtitle: "Everything you hear on this Mac",
                       isOn: $recorder.captureSystemAudio,
                       enabled: !recorder.isRecording)
 
-            toggleRow(icon: "mic.fill",
+            ToggleRow(icon: "mic.fill",
                       title: "Microphone",
                       subtitle: "Your voice, on its own track",
                       isOn: $recorder.captureMicrophone,
                       enabled: !recorder.isRecording)
 
-            toggleRow(icon: "person.crop.circle.fill",
+            ToggleRow(icon: "person.crop.circle.fill",
                       title: "Webcam",
                       subtitle: WebcamRecorder.hasCamera
                           ? "Recorded alongside, placed later in the editor"
@@ -227,39 +227,6 @@ struct ContentView: View {
                       enabled: !recorder.isRecording && WebcamRecorder.hasCamera)
         }
         .card(padding: Space.m)
-    }
-
-    private func toggleRow(icon: String,
-                           title: String,
-                           subtitle: String,
-                           isOn: Binding<Bool>,
-                           enabled: Bool) -> some View {
-        HStack(spacing: Space.m) {
-            Image(systemName: icon)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isOn.wrappedValue && enabled ? Palette.accent : .secondary)
-                .frame(width: 26, height: 26)
-                .background(Color.primary.opacity(0.05),
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .animation(Motion.press, value: isOn.wrappedValue)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).titleType()
-                Text(subtitle).captionType().foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: Space.s)
-
-            Toggle("", isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .tint(Palette.accent)
-        }
-        .padding(.vertical, 5)
-        .padding(.horizontal, Space.xs)
-        .opacity(enabled ? 1 : 0.45)
-        .disabled(!enabled)
     }
 
     // MARK: - Record
@@ -427,20 +394,5 @@ struct ContentView: View {
     private func timeString(_ t: TimeInterval) -> String {
         let s = Int(t)
         return String(format: "%02d:%02d", s / 60, s % 60)
-    }
-}
-
-// MARK: - Launch stagger
-//
-// The launch cascade is a once-per-session moment, so it can spend a little of
-// the delight budget. 55ms between cards — long enough to read as a cascade,
-// short enough that nothing feels withheld. It never blocks interaction.
-
-private extension View {
-    func stagger(_ index: Int, appeared: Bool, reduce: Bool) -> some View {
-        let delay = reduce ? 0 : Double(index) * 0.055
-        return opacity(appeared ? 1 : 0)
-            .offset(y: appeared || reduce ? 0 : 8)
-            .animation(Motion.enter(reduce).delay(delay), value: appeared)
     }
 }

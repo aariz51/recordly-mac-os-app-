@@ -12,6 +12,11 @@ enum Motion {
     /// Press feedback. Fires on pointer-*down*, so it must be short.
     static let press = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.16)
 
+    /// Hover and colour changes. These aren't entrances, so they take the
+    /// symmetric `ease` curve rather than the punchy ease-out — a highlight that
+    /// snaps in and crawls out reads as twitchy.
+    static let hover = Animation.easeInOut(duration: 0.14)
+
     /// Something entering or leaving the screen.
     static func enter(_ reduce: Bool) -> Animation {
         reduce ? .easeOut(duration: 0.15) : .timingCurve(0.23, 1, 0.32, 1, duration: 0.22)
@@ -26,6 +31,24 @@ enum Motion {
     static func settle(_ reduce: Bool) -> Animation {
         reduce ? .easeOut(duration: 0.15) : .spring(duration: 0.4, bounce: 0)
     }
+
+    /// The return after a gesture let go past a boundary. This is the one place
+    /// a little overshoot is earned — the drag carried momentum into the wall.
+    static func recoil(_ reduce: Bool) -> Animation {
+        reduce ? .easeOut(duration: 0.15) : .spring(duration: 0.3, bounce: 0.2)
+    }
+
+    /// Determinate progress. Constant motion takes a linear curve; easing a
+    /// progress bar makes it lie about the rate of work.
+    static let progress = Animation.linear(duration: 0.2)
+}
+
+/// Rubber-banding: past a boundary the surface still follows, just less and less.
+/// Apple's constant, from *Designing Fluid Interfaces*.
+func rubberband(_ overshoot: CGFloat, dimension: CGFloat, constant: CGFloat = 0.55) -> CGFloat {
+    guard dimension > 0 else { return 0 }
+    let magnitude = abs(overshoot)
+    return (overshoot * dimension * constant) / (dimension + constant * magnitude)
 }
 
 extension AnyTransition {
@@ -73,9 +96,17 @@ enum Space {
     static let xxl: CGFloat = 30
 }
 
+/// One ladder of corner radii. Hand-typed radii that almost match are the visual
+/// equivalent of five almost-identical easing curves — the eye reads the drift
+/// even when it can't name it.
 enum Radius {
-    static let control: CGFloat = 8
-    static let card: CGFloat = 14
+    static let chip: CGFloat = 6      // speed chips
+    static let inset: CGFloat = 7     // icon tiles, caption rows, small wells
+    static let control: CGFloat = 8   // buttons, swatches
+    static let track: CGFloat = 9     // slider / trim tracks
+    static let stage: CGFloat = 10    // the video preview
+    static let badge: CGFloat = 11    // the app mark
+    static let card: CGFloat = 14     // grouped cards
 }
 
 // MARK: - Typography
@@ -127,6 +158,22 @@ struct CardSurface: ViewModifier {
                         LinearGradient(colors: [Color.primary.opacity(0.14), Color.primary.opacity(0.04)],
                                        startPoint: .top, endPoint: .bottom),
                         lineWidth: 1))
+    }
+}
+
+// MARK: - Entrance cascade
+//
+// A group of panels arriving together is a once-per-window moment, so it can
+// spend a little of the delight budget. 55ms between items — long enough to read
+// as a cascade, short enough that nothing feels withheld. It is decorative, so
+// it never gates input: everything is hit-testable from the first frame.
+
+extension View {
+    func stagger(_ index: Int, appeared: Bool, reduce: Bool) -> some View {
+        let delay = reduce ? 0 : Double(index) * 0.055
+        return opacity(appeared ? 1 : 0)
+            .offset(y: appeared || reduce ? 0 : 8)
+            .animation(Motion.enter(reduce).delay(delay), value: appeared)
     }
 }
 
@@ -185,7 +232,7 @@ struct ActionButtonStyle: ButtonStyle {
                 .scaleEffect(configuration.isPressed ? 0.97 : 1)
                 .opacity(isEnabled ? 1 : 0.4)
                 .animation(Motion.press, value: configuration.isPressed)
-                .animation(Motion.press, value: hovering)
+                .animation(Motion.hover, value: hovering)
                 .onHover { hovering = $0 }
         }
 
@@ -265,16 +312,135 @@ struct FeedbackLine: View {
     let kind: FeedbackKind
     let message: String
 
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Space.s) {
             Image(systemName: kind.symbol)
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(kind.color)
-            Text(message)
-                .captionType()
-                .foregroundStyle(kind == .status ? .secondary : .primary)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+                // The icon morphs between kinds instead of blinking out and back.
+                .contentTransition(.symbolEffect(.replace))
+
+            // One sentence replacing another is a crossfade, and a crossfade
+            // shows two legible strings at once — which reads as a glitch, not a
+            // change. A touch of blur through the swap fuses them into one.
+            ZStack(alignment: .topLeading) {
+                Text(message)
+                    .captionType()
+                    .foregroundStyle(kind == .status ? .secondary : .primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .id(message)
+                    .transition(reduce ? AnyTransition.opacity
+                                       : AnyTransition(.blurReplace(.downUp)))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(message)
+    }
+}
+
+// MARK: - Determinate progress
+//
+// A spinner answers "is it alive?". A job that can run for a minute also has to
+// answer "how much longer?" — so the render reports a real fraction. The fill is
+// a transform, not a width, so it stays off the layout path.
+
+struct ProgressTrack: View {
+    /// 0...1, or nil while the work has started but has no measurable progress yet.
+    let fraction: Double?
+
+    var body: some View {
+        Capsule()
+            .fill(Color.primary.opacity(0.12))
+            .frame(height: 4)
+            .overlay(alignment: .leading) {
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(Palette.accent)
+                        .frame(width: geo.size.width)
+                        .scaleEffect(x: CGFloat(min(max(fraction ?? 0.03, 0.015), 1)),
+                                     y: 1,
+                                     anchor: .leading)
+                }
+            }
+            .clipShape(Capsule())
+            .animation(Motion.progress, value: fraction)
+            .accessibilityValue(fraction.map { "\(Int($0 * 100)) percent" } ?? "In progress")
+    }
+}
+
+// MARK: - Toggle row
+//
+// The switch is the control, but the label is what the eye reads and the pointer
+// aims at. A 28pt switch beside a 280pt row that means exactly the same thing is
+// a mapping failure — so the whole row is the target, and it presses like one.
+
+struct ToggleRow: View {
+    var icon: String?
+    let title: String
+    var subtitle: String?
+    @Binding var isOn: Bool
+    var enabled: Bool = true
+    var onChange: () -> Void = {}
+
+    @State private var hovering = false
+
+    var body: some View {
+        Button {
+            isOn.toggle()
+            onChange()
+        } label: {
+            HStack(spacing: Space.m) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(isOn && enabled ? Palette.accent : .secondary)
+                        .frame(width: 26, height: 26)
+                        .background(Color.primary.opacity(0.05),
+                                    in: RoundedRectangle(cornerRadius: Radius.inset, style: .continuous))
+                        .animation(Motion.hover, value: isOn)
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).titleType()
+                    if let subtitle {
+                        Text(subtitle)
+                            .captionType()
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .multilineTextAlignment(.leading)
+
+                Spacer(minLength: Space.s)
+
+                Toggle("", isOn: $isOn)
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .tint(Palette.accent)
+                    // The row owns the gesture; the switch is the readout.
+                    .allowsHitTesting(false)
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, Space.s)
+            .background(
+                RoundedRectangle(cornerRadius: Radius.inset, style: .continuous)
+                    .fill(Color.primary.opacity(hovering && enabled ? 0.05 : 0)))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.inset, style: .continuous))
+        }
+        .buttonStyle(PressableStyle(scale: 0.985))
+        .onHover { hovering = $0 && enabled }
+        .animation(Motion.hover, value: hovering)
+        .opacity(enabled ? 1 : 0.45)
+        .disabled(!enabled)
+        // VoiceOver should hear a switch, not a button that happens to flip one.
+        .accessibilityRepresentation {
+            Toggle(isOn: $isOn) {
+                Text(subtitle.map { "\(title). \($0)" } ?? title)
+            }
         }
     }
 }

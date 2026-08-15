@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 // MARK: - Background swatches
 //
@@ -30,14 +31,14 @@ struct BackgroundSwatch: View {
     var body: some View {
         Button(action: action) {
             VStack(spacing: 5) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                     .fill(background.preview)
                     .frame(height: 38)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                             .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
                             .strokeBorder(Palette.accent, lineWidth: 2)
                             .opacity(isSelected ? 1 : 0))
                     .overlay(alignment: .bottomTrailing) {
@@ -68,15 +69,31 @@ struct BackgroundSwatch: View {
 // part, and the render only re-runs when the drag ends.
 
 struct TrimBar: View {
+    enum Handle: Hashable { case start, end }
+
     let duration: Double
     @Binding var start: Double
     @Binding var end: Double
     /// Current playback position in *source* time, or nil when unknown.
     var playhead: Double?
+    /// Called continuously while a handle is dragged, with the source time now
+    /// under that handle. The preview follows the grip, so you cut on a frame
+    /// you can actually see rather than on a number.
+    var onScrub: ((Double) -> Void)?
     var onCommit: () -> Void
 
-    @State private var grabbedStart: Double?
-    @State private var grabbedEnd: Double?
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    @State private var grabbed: Handle?
+    @State private var grabBase: Double = 0
+    /// How far past the boundary the pointer has pushed, in points, already
+    /// rubber-banded. Real things resist before they stop.
+    @State private var overshoot: CGFloat = 0
+    @State private var hovered: Handle?
+    /// Which handles have pushed a cursor. `NSCursor` keeps a stack, and an
+    /// unbalanced pop leaves the pointer stuck as a resize arrow for the rest of
+    /// the session — so a push is only ever popped once.
+    @State private var cursorPushed: Set<Handle> = []
 
     private let handleWidth: CGFloat = 11
     private let minGap: Double = 0.2
@@ -85,17 +102,18 @@ struct TrimBar: View {
         GeometryReader { geo in
             let usable = max(geo.size.width - handleWidth * 2, 1)
             let span = max(duration, 0.001)
-            let startX = CGFloat(start / span) * usable
-            let endX = CGFloat(end / span) * usable + handleWidth
+            let startX = CGFloat(start / span) * usable + (grabbed == .start ? overshoot : 0)
+            let endX = CGFloat(end / span) * usable + handleWidth + (grabbed == .end ? overshoot : 0)
 
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: Radius.track, style: .continuous)
                     .fill(Color.primary.opacity(0.07))
 
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Palette.accent.opacity(0.18))
+                RoundedRectangle(cornerRadius: Radius.track, style: .continuous)
+                    .fill(Palette.accent.opacity(grabbed == nil ? 0.18 : 0.26))
                     .frame(width: max(endX - startX + handleWidth, handleWidth * 2))
                     .offset(x: startX)
+                    .animation(Motion.hover, value: grabbed)
 
                 if let playhead, playhead >= start, playhead <= end {
                     Capsule()
@@ -106,13 +124,13 @@ struct TrimBar: View {
                         .allowsHitTesting(false)
                 }
 
-                handle
+                handle(.start)
                     .offset(x: startX)
-                    .gesture(dragGesture(usable: usable, span: span, isStart: true))
+                    .gesture(dragGesture(usable: usable, span: span, handle: .start))
 
-                handle
+                handle(.end)
                     .offset(x: endX)
-                    .gesture(dragGesture(usable: usable, span: span, isStart: false))
+                    .gesture(dragGesture(usable: usable, span: span, handle: .end))
             }
             // The handles move as they're dragged, so translation has to be
             // measured against the track — not against the handle's own frame,
@@ -122,41 +140,84 @@ struct TrimBar: View {
         .frame(height: 34)
     }
 
-    private var handle: some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
+    private func handle(_ which: Handle) -> some View {
+        let active = grabbed == which
+        let lit = active || hovered == which
+        return RoundedRectangle(cornerRadius: 5, style: .continuous)
             .fill(Palette.accent)
             .frame(width: handleWidth)
             .overlay(
                 RoundedRectangle(cornerRadius: 1, style: .continuous)
                     .fill(Color.white.opacity(0.75))
                     .frame(width: 2, height: 12))
-            .shadow(color: .black.opacity(0.25), radius: 3, y: 1)
-            .contentShape(Rectangle().inset(by: -6))   // a little hit padding
+            .shadow(color: .black.opacity(active ? 0.4 : 0.25), radius: active ? 6 : 3, y: 1)
+            .brightness(lit ? 0.06 : 0)
+            // Feedback on pointer-*down*: the grip thickens the instant it is
+            // taken, before a single pixel of movement has happened.
+            .scaleEffect(x: active ? 1.35 : 1, y: active ? 1.1 : 1)
+            .animation(Motion.press, value: active)
+            .animation(Motion.hover, value: lit)
+            .contentShape(Rectangle().inset(by: -8))   // a little hit padding
+            .onHover { inside in
+                hovered = inside ? which : (hovered == which ? nil : hovered)
+                if inside, !cursorPushed.contains(which) {
+                    cursorPushed.insert(which)
+                    NSCursor.resizeLeftRight.push()
+                } else if !inside, cursorPushed.remove(which) != nil {
+                    NSCursor.pop()
+                }
+            }
+            .accessibilityElement()
+            .accessibilityLabel(which == .start ? "Trim start" : "Trim end")
+            .accessibilityValue(Self.timeLabel(which == .start ? start : end))
+            .accessibilityAdjustableAction { direction in
+                let step = max(duration / 100, 0.1)
+                let delta = direction == .increment ? step : -step
+                switch which {
+                case .start: start = min(max(0, start + delta), end - minGap)
+                case .end:   end = max(min(duration, end + delta), start + minGap)
+                }
+                onScrub?(which == .start ? start : end)
+                onCommit()
+            }
     }
 
     /// `minimumDistance: 0` so the handle answers on pointer-down, and the value
     /// is offset from where it was grabbed rather than snapping under the pointer.
     private static let track = "reclip.trim.track"
 
-    private func dragGesture(usable: CGFloat, span: Double, isStart: Bool) -> some Gesture {
+    private func dragGesture(usable: CGFloat, span: Double, handle which: Handle) -> some Gesture {
         DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.track))
             .onChanged { value in
-                let delta = Double(value.translation.width / usable) * span
-                if isStart {
-                    let base = grabbedStart ?? start
-                    if grabbedStart == nil { grabbedStart = base }
-                    start = min(max(0, base + delta), end - minGap)
-                } else {
-                    let base = grabbedEnd ?? end
-                    if grabbedEnd == nil { grabbedEnd = base }
-                    end = max(min(duration, base + delta), start + minGap)
+                if grabbed != which {
+                    grabbed = which
+                    grabBase = which == .start ? start : end
                 }
+                let desired = grabBase + Double(value.translation.width / usable) * span
+                let lower = which == .start ? 0 : start + minGap
+                let upper = which == .start ? end - minGap : duration
+                let clamped = min(max(desired, lower), upper)
+
+                if which == .start { start = clamped } else { end = clamped }
+
+                // Past the boundary the handle keeps following the pointer, just
+                // less and less — a wall you can lean on rather than one you hit.
+                let excessPoints = CGFloat((desired - clamped) / span) * usable
+                overshoot = reduce ? 0 : rubberband(excessPoints, dimension: usable * 0.5)
+
+                onScrub?(clamped)
             }
             .onEnded { _ in
-                grabbedStart = nil
-                grabbedEnd = nil
+                grabbed = nil
+                grabBase = 0
+                withAnimation(Motion.recoil(reduce)) { overshoot = 0 }
                 onCommit()
             }
+    }
+
+    static func timeLabel(_ t: Double) -> String {
+        let s = Int(max(t, 0).rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 
@@ -209,10 +270,10 @@ struct Chip: View {
                 .frame(maxWidth: .infinity)
                 .foregroundStyle(isSelected ? .white : .secondary)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: Radius.chip, style: .continuous)
                         .fill(isSelected ? Palette.accent : Color.primary.opacity(hovering ? 0.10 : 0.06)))
                 .animation(Motion.enter(reduce), value: isSelected)
-                .animation(Motion.press, value: hovering)
+                .animation(Motion.hover, value: hovering)
         }
         .buttonStyle(PressableStyle())
         .onHover { hovering = $0 }
@@ -232,10 +293,10 @@ struct CornerPicker: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
+            RoundedRectangle(cornerRadius: Radius.inset, style: .continuous)
                 .fill(Color.primary.opacity(0.06))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: Radius.inset, style: .continuous)
                         .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
 
             dot(.topLeading, alignment: .topLeading)
@@ -266,35 +327,3 @@ struct CornerPicker: View {
     }
 }
 
-// MARK: - Inspector rows
-
-struct InspectorToggle: View {
-    let title: String
-    var subtitle: String?
-    @Binding var isOn: Bool
-    var enabled: Bool = true
-    var onChange: () -> Void
-
-    var body: some View {
-        HStack(alignment: .center, spacing: Space.s) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).titleType()
-                if let subtitle {
-                    Text(subtitle)
-                        .captionType()
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            Spacer(minLength: Space.s)
-            Toggle("", isOn: $isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .tint(Palette.accent)
-                .onChange(of: isOn) { onChange() }
-        }
-        .opacity(enabled ? 1 : 0.45)
-        .disabled(!enabled)
-    }
-}

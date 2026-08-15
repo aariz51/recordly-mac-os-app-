@@ -18,7 +18,8 @@ enum GifExport {
                        speed: Double = 1.0,
                        fps: Double = 12,
                        maxWidth: CGFloat = 720,
-                       loop: Bool = true) async throws {
+                       loop: Bool = true,
+                       progress: (@Sendable (Double) -> Void)? = nil) async throws {
         let tl = try await StyledExport.makeTimeline(source: source, style: style, zoom: zoom,
                                                      webcam: webcam, webcamSettings: webcamSettings,
                                                      annotations: annotations, trim: trim, speed: speed)
@@ -50,6 +51,7 @@ enum GifExport {
             let t = CMTime(seconds: start + Double(i) / fps, preferredTimescale: 600)
             let result = try await generator.image(at: t)
             CGImageDestinationAddImage(dest, result.image, frameProps as CFDictionary)
+            progress?(Double(i + 1) / Double(frameCount))
         }
 
         if !CGImageDestinationFinalize(dest) {
