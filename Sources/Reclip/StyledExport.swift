@@ -107,7 +107,9 @@ enum StyledExport {
                              trim: CMTimeRange? = nil,
                              speed: Double = 1.0,
                              cursor: CursorTrack? = nil,
-                             cursorStyle: CursorStyle = CursorStyle()) async throws -> StyledTimeline {
+                             cursorStyle: CursorStyle = CursorStyle(),
+                             captions: [CaptionCue] = [],
+                             captionSettings: CaptionSettings = CaptionSettings()) async throws -> StyledTimeline {
         let srcAsset = AVURLAsset(url: source)
         guard let vTrack = try await srcAsset.loadTracks(withMediaType: .video).first else {
             throw StyledExportError.noVideoTrack
@@ -182,7 +184,9 @@ enum StyledExport {
                                                   webcam: webcam, time: srcT, settings: webcamSettings)
             let withText = Annotations.composite(base: withCam, canvas: canvas,
                                                  rendered: renderedAnnotations, time: srcT)
-            request.finish(with: withText, context: nil)
+            let withCaptions = CaptionRenderer.composite(base: withText, canvas: canvas,
+                                                         cues: captions, time: srcT, settings: captionSettings)
+            request.finish(with: withCaptions, context: nil)
         }
         video.renderSize = canvas
         return StyledTimeline(asset: comp, video: video, duration: comp.duration.seconds)
@@ -249,11 +253,14 @@ enum StyledExport {
                        quality: ExportQuality = .high,
                        cursor: CursorTrack? = nil,
                        cursorStyle: CursorStyle = CursorStyle(),
+                       captions: [CaptionCue] = [],
+                       captionSettings: CaptionSettings = CaptionSettings(),
                        progress: (@Sendable (Double) -> Void)? = nil) async throws {
         let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
                                         webcam: webcam, webcamSettings: webcamSettings,
                                         annotations: annotations, trim: trim, speed: speed,
-                                        cursor: cursor, cursorStyle: cursorStyle)
+                                        cursor: cursor, cursorStyle: cursorStyle,
+                                        captions: captions, captionSettings: captionSettings)
         guard let export = AVAssetExportSession(asset: tl.asset, presetName: quality.preset) else {
             throw StyledExportError.exportSessionFailed("could not create export session")
         }

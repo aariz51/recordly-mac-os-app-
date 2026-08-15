@@ -124,3 +124,21 @@ final class TimeMapTests: XCTestCase {
         XCTAssertEqual(srcTime(1), 4.0, accuracy: 0.0001)   // 2x speed advances source twice as fast
     }
 }
+
+final class CaptionExportTests: XCTestCase {
+    func testSRTAndVTTFormat() {
+        let cues = [CaptionCue(text: "Hello", start: 1.0, end: 3.5),
+                    CaptionCue(text: "World", start: 4.0, end: 5.0)]
+        let srt = CaptionExport.srt(cues)
+        XCTAssertTrue(srt.contains("1\n00:00:01,000 --> 00:00:03,500\nHello"), srt)
+        XCTAssertTrue(srt.contains("2\n00:00:04,000 --> 00:00:05,000\nWorld"))
+        let vtt = CaptionExport.vtt(cues)
+        XCTAssertTrue(vtt.hasPrefix("WEBVTT"))
+        XCTAssertTrue(vtt.contains("00:00:01.000 --> 00:00:03.500"))
+    }
+
+    func testTimecode() {
+        XCTAssertEqual(CaptionExport.timecode(3661.25, sep: ","), "01:01:01,250")
+        XCTAssertEqual(CaptionExport.timecode(0, sep: "."), "00:00:00.000")
+    }
+}

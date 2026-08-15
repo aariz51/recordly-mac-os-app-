@@ -192,4 +192,14 @@ final class ParityFeatureTests: XCTestCase {
         try await StyledExport.export(source: src, to: out, style: StyleOptions(), annotations: [ann])
         try await assertValid(out)
     }
+
+    func testCaptionRenderExports() async throws {
+        let src = tmp("cap-src.mp4"); try await makeVideo(src)
+        let cues = [CaptionCue(text: "Hello there", start: 0.1, end: 1.0)]
+        var cs = CaptionSettings(); cs.enabled = true; cs.fontFraction = 0.06
+        let out = tmp("cap.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(),
+                                      captions: cues, captionSettings: cs)
+        try await assertValid(out)
+    }
 }
