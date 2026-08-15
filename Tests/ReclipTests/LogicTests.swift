@@ -198,6 +198,64 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class ExtensionManifestTests: XCTestCase {
+    private func manifest(id: String = "com.example.sparkles", main: String = "index.js",
+                          version: String = "1.2.0",
+                          permissions: [ExtensionPermission] = [.render, .cursor]) -> ExtensionManifest {
+        ExtensionManifest(id: id, name: "Sparkles", version: version, description: "click sparkles",
+                          author: nil, homepage: nil, license: "MIT", engine: nil, icon: nil,
+                          main: main, permissions: permissions)
+    }
+
+    func testValidManifestValidates() throws {
+        XCTAssertNoThrow(try manifest().validate())
+    }
+
+    func testMissingFieldsRejected() {
+        XCTAssertThrowsError(try manifest(main: "").validate()) {
+            XCTAssertEqual($0 as? ExtensionManifest.ValidationError, .missingField("main"))
+        }
+        XCTAssertThrowsError(try manifest(id: "  ").validate()) {
+            XCTAssertEqual($0 as? ExtensionManifest.ValidationError, .missingField("id"))
+        }
+        XCTAssertThrowsError(try manifest(version: "v2").validate()) {
+            XCTAssertEqual($0 as? ExtensionManifest.ValidationError, .invalidVersion("v2"))
+        }
+    }
+
+    func testJSONRoundTrip() throws {
+        let m = manifest()
+        let data = try JSONEncoder().encode(m)
+        let back = try JSONDecoder().decode(ExtensionManifest.self, from: data)
+        XCTAssertEqual(back, m)
+        XCTAssertEqual(back.permissions, [.render, .cursor])
+    }
+
+    func testPermissionGating() throws {
+        var reg = ExtensionRegistry()
+        let m = manifest(permissions: [.render])
+        try reg.install(m)
+        XCTAssertEqual(reg.installed.count, 1)
+        XCTAssertNoThrow(try reg.requirePermission(.render, of: m, for: "registerRenderHook"))
+        XCTAssertThrowsError(try reg.requirePermission(.cursor, of: m, for: "registerCursorEffect")) {
+            XCTAssertEqual($0 as? ExtensionRegistryError, .permissionDenied(.cursor, action: "registerCursorEffect"))
+        }
+    }
+
+    func testInstallReplacesSameId() throws {
+        var reg = ExtensionRegistry()
+        try reg.install(manifest(version: "1.0.0"))
+        try reg.install(manifest(version: "2.0.0"))
+        XCTAssertEqual(reg.installed.count, 1, "same id replaces, not duplicates")
+        XCTAssertEqual(reg.manifest(id: "com.example.sparkles")?.version, "2.0.0")
+    }
+
+    func testAllPermissionsCovered() {
+        XCTAssertEqual(Set(ExtensionPermission.allCases.map(\.rawValue)),
+                       ["render", "cursor", "audio", "timeline", "ui", "assets", "export"])
+    }
+}
+
 final class TimelineModelTests: XCTestCase {
     func testSpansOverlap() {
         XCTAssertTrue(TimelineModel.spansOverlap(.init(start: 0, end: 5), .init(start: 3, end: 8)))
