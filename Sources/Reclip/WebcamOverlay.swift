@@ -5,10 +5,17 @@ import CoreImage.CIFilterBuiltins
 
 struct WebcamSettings: Equatable {
     enum Corner: String, CaseIterable, Identifiable {
+        // Original four (raw values preserved so existing .reclip projects still decode)…
         case bottomTrailing = "Bottom right"
         case bottomLeading = "Bottom left"
         case topTrailing = "Top right"
         case topLeading = "Top left"
+        // …plus the five mid positions for a full 9-cell grid.
+        case topCenter = "Top center"
+        case centerLeading = "Center left"
+        case center = "Center"
+        case centerTrailing = "Center right"
+        case bottomCenter = "Bottom center"
         var id: String { rawValue }
     }
     var enabled = false
@@ -96,13 +103,21 @@ enum WebcamOverlay {
         let bubble = roundedMask(img, radius: cornerRadius)
 
         let margin = shortSide * CGFloat(settings.marginFraction)
+        // Horizontal (leading/center/trailing) and vertical (bottom/middle/top) anchors.
+        let leftX = margin, midX = (canvas.width - bw) / 2, rightX = canvas.width - bw - margin
+        let botY = margin, midY = (canvas.height - bh) / 2, topY = canvas.height - bh - margin
         let x: CGFloat
         let y: CGFloat
         switch settings.corner {
-        case .bottomTrailing: x = canvas.width - bw - margin; y = margin
-        case .bottomLeading:  x = margin;                     y = margin
-        case .topTrailing:    x = canvas.width - bw - margin; y = canvas.height - bh - margin
-        case .topLeading:     x = margin;                     y = canvas.height - bh - margin
+        case .topLeading:      x = leftX;  y = topY
+        case .topCenter:       x = midX;   y = topY
+        case .topTrailing:     x = rightX; y = topY
+        case .centerLeading:   x = leftX;  y = midY
+        case .center:          x = midX;   y = midY
+        case .centerTrailing:  x = rightX; y = midY
+        case .bottomLeading:   x = leftX;  y = botY
+        case .bottomCenter:    x = midX;   y = botY
+        case .bottomTrailing:  x = rightX; y = botY
         }
         let positioned = bubble.transformed(by: CGAffineTransform(translationX: x, y: y))
 

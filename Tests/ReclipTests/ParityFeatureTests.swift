@@ -231,6 +231,23 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testWebcamNineCellPositions() async throws {
+        XCTAssertEqual(WebcamSettings.Corner.allCases.count, 9, "full 9-cell position grid")
+        let src = tmp("wc9-src.mp4"); try await makeVideo(src)
+        let cam = WebcamRecorder.sidecarURL(for: src)
+        try await makeVideo(cam, size: CGSize(width: 300, height: 300))
+        let frames = await WebcamOverlay.load(for: src)
+        XCTAssertFalse(frames.isEmpty)
+        // Exercise the new center positions end-to-end.
+        for corner in [WebcamSettings.Corner.center, .topCenter, .centerTrailing, .bottomCenter] {
+            var wc = WebcamSettings(); wc.enabled = true; wc.corner = corner; wc.sizeFraction = 0.25
+            let out = tmp("wc9-\(corner.rawValue).mp4")
+            try await StyledExport.export(source: src, to: out, style: StyleOptions(),
+                                          webcam: frames, webcamSettings: wc)
+            try await assertValid(out)
+        }
+    }
+
     func testPerSidePaddingExports() async throws {
         let src = tmp("pad-src.mp4"); try await makeVideo(src)
         var s = StyleOptions()
