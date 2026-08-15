@@ -1,5 +1,6 @@
 import SwiftUI
 import ScreenCaptureKit
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @StateObject private var recorder = ScreenRecorder()
@@ -17,6 +18,9 @@ struct ContentView: View {
     @State private var selectedWindowID: CGWindowID?
     @State private var statusMessage = "Ready to record."
     @State private var lastSavedURL: URL?
+    @State private var editing: EditItem?
+
+    struct EditItem: Identifiable { let url: URL; var id: String { url.path } }
 
     var body: some View {
         VStack(spacing: 18) {
@@ -52,18 +56,40 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
 
             if let url = lastSavedURL {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
-                } label: {
-                    Label("Reveal last recording in Finder", systemImage: "folder")
+                HStack(spacing: 16) {
+                    Button {
+                        editing = EditItem(url: url)
+                    } label: { Label("Polish & Export", systemImage: "wand.and.stars") }
+                    Button {
+                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    } label: { Label("Reveal in Finder", systemImage: "folder") }
                 }
                 .buttonStyle(.link)
             }
+
+            Button {
+                openRecording()
+            } label: { Label("Open a recording to polish…", systemImage: "folder.badge.plus") }
+                .buttonStyle(.link)
+                .disabled(recorder.isRecording)
+
             Spacer()
         }
         .padding(24)
         .task { await refreshSources() }
         .onChange(of: sourceKind) { Task { await refreshSources() } }
+        .sheet(item: $editing) { item in
+            EditorView(sourceURL: item.url) { editing = nil }
+        }
+    }
+
+    private func openRecording() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url {
+            editing = EditItem(url: url)
+        }
     }
 
     private var header: some View {
