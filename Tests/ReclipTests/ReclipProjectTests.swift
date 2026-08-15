@@ -15,19 +15,27 @@ final class ReclipProjectTests: XCTestCase {
         style.crop = StyleOptions.CropInsets(top: 0.1, bottom: 0.05, left: 0.02, right: 0.03)
         style.background = .solid(red: 0.2, green: 0.4, blue: 0.6)
 
-        let zoom = ZoomTimeline(regions: [
+        var zoom = ZoomTimeline(regions: [
             ZoomRegion(start: 1, end: 3, scale: 2.2, focus: CGPoint(x: 0.4, y: 0.6))
         ])
+        zoom.easing = .snappy
         var cam = WebcamSettings()
         cam.enabled = true; cam.mirror = false; cam.roundness = 0.5
-        cam.corner = .topLeading; cam.marginFraction = 0.07; cam.sizeFraction = 0.3
-        let caps = [Annotation(text: "Hi", start: 0.5, end: 2.0,
-                               position: CGPoint(x: 0.5, y: 0.2), fontFraction: 0.06)]
+        cam.corner = .topLeading; cam.marginFraction = 0.07; cam.sizeFraction = 0.3; cam.aspectRatio = 0.7
+        var blur = Annotation(text: "", start: 0.3, end: 1.2)
+        blur.kind = .blur; blur.blurRadius = 30; blur.regionSize = CGSize(width: 0.2, height: 0.15)
+        let caps = [
+            Annotation(text: "Hi", start: 0.5, end: 2.0, position: CGPoint(x: 0.5, y: 0.2), fontFraction: 0.06),
+            blur
+        ]
+        var cs = CursorStyle(); cs.enabled = true; cs.kind = .dot; cs.size = 2.0
+        let cues = [CaptionCue(text: "Subtitle", start: 0, end: 1)]
 
         let project = ReclipProject.capture(
             source: URL(fileURLWithPath: "/tmp/rec.mp4"),
             style: style, zoom: zoom, webcam: cam, annotations: caps,
-            trimStart: 0.2, trimEnd: 4.0, speed: 1.5)
+            trimStart: 0.2, trimEnd: 4.0, speed: 1.5,
+            cursorStyle: cs, captionCues: cues, captionsEnabled: true)
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("roundtrip.reclip")
         try? FileManager.default.removeItem(at: url)
@@ -52,11 +60,23 @@ final class ReclipProjectTests: XCTestCase {
         XCTAssertEqual(loaded.trimEnd, 4.0, accuracy: 1e-9)
         XCTAssertEqual(loaded.speed, 1.5, accuracy: 1e-9)
 
+        // Zoom easing persists.
+        XCTAssertEqual(loaded.zoomTimeline().easing, .snappy)
+
+        // Both annotations (text + blur) round-trip with their kind + data.
         let restored = loaded.annotationList()
-        XCTAssertEqual(restored.count, 1)
+        XCTAssertEqual(restored.count, 2)
         XCTAssertEqual(restored.first?.text, "Hi")
-        XCTAssertEqual(restored.first?.start ?? -1, 0.5, accuracy: 1e-9)
-        XCTAssertEqual(restored.first?.position.y ?? -1, 0.2, accuracy: 1e-9)
+        let blurBack = restored.first(where: { $0.kind == .blur })
+        XCTAssertNotNil(blurBack)
+        XCTAssertEqual(blurBack?.blurRadius ?? -1, 30, accuracy: 1e-9)
+        XCTAssertEqual(blurBack?.regionSize.width ?? -1, 0.2, accuracy: 1e-9)
+
+        // Cursor style + caption cues persist.
+        XCTAssertEqual(loaded.cursorStyleValue(), cs)
+        XCTAssertEqual(loaded.captionCueList().count, 1)
+        XCTAssertEqual(loaded.captionCueList().first?.text, "Subtitle")
+        XCTAssertTrue(loaded.captionsEnabled)
     }
 
     func testGradientAndSourceAspectRoundTrip() throws {

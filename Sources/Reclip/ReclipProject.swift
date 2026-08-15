@@ -17,14 +17,27 @@ struct ReclipProject: Codable, Equatable {
     var crop: Crop
 
     var zoomRegions: [Zoom]
+    var zoomEasing: String = ZoomEasing.smooth.rawValue
+    var zoomRamp: Double = 0.5
     var webcam: Cam
     var captions: [Cap]
+
+    var cursor: CursorDTO = CursorDTO()
+    var captionCues: [CueDTO] = []
+    var captionsEnabled: Bool = false
 
     var trimStart: Double
     var trimEnd: Double
     var speed: Double
 
     // MARK: Nested codable DTOs
+
+    struct CursorDTO: Codable, Equatable {
+        var enabled = false
+        var kind = CursorStyle.Kind.arrow.rawValue
+        var size = 1.0
+    }
+    struct CueDTO: Codable, Equatable { var text: String; var start: Double; var end: Double }
 
     struct BG: Codable, Equatable {
         var kind: String            // "solid" | "gradient"
@@ -53,14 +66,26 @@ struct ReclipProject: Codable, Equatable {
     struct Cam: Codable, Equatable {
         var enabled: Bool; var corner: String; var size: Double; var margin: Double
         var roundness: Double; var mirror: Bool; var shadow: Bool
+        var aspectRatio: Double = 1.0
     }
-    struct Cap: Codable, Equatable { var text: String; var start: Double; var end: Double; var x: Double; var y: Double; var fontFraction: Double }
+    struct Cap: Codable, Equatable {
+        var text: String; var start: Double; var end: Double
+        var x: Double; var y: Double; var fontFraction: Double
+        var kind: String = Annotation.Kind.text.rawValue
+        var rw: Double = 0.3; var rh: Double = 0.2
+        var blurRadius: Double = 24
+        var color: [Double] = [0, 0, 0, 0.85]
+        var imageB64: String? = nil
+    }
 
     // MARK: Capture / restore
 
     static func capture(source: URL, style: StyleOptions, zoom: ZoomTimeline,
                         webcam: WebcamSettings, annotations: [Annotation],
-                        trimStart: Double, trimEnd: Double, speed: Double) -> ReclipProject {
+                        trimStart: Double, trimEnd: Double, speed: Double,
+                        cursorStyle: CursorStyle = CursorStyle(),
+                        captionCues: [CaptionCue] = [],
+                        captionsEnabled: Bool = false) -> ReclipProject {
         ReclipProject(
             sourceFileName: source.lastPathComponent,
             background: .from(style.background),
@@ -72,9 +97,20 @@ struct ReclipProject: Codable, Equatable {
             aspect: style.aspect.rawValue,
             crop: Crop(top: style.crop.top, bottom: style.crop.bottom, left: style.crop.left, right: style.crop.right),
             zoomRegions: zoom.regions.map { Zoom(start: $0.start, end: $0.end, scale: Double($0.scale), fx: $0.focus.x, fy: $0.focus.y) },
+            zoomEasing: zoom.easing.rawValue,
+            zoomRamp: zoom.ramp,
             webcam: Cam(enabled: webcam.enabled, corner: webcam.corner.rawValue, size: webcam.sizeFraction,
-                        margin: webcam.marginFraction, roundness: webcam.roundness, mirror: webcam.mirror, shadow: webcam.shadow),
-            captions: annotations.map { Cap(text: $0.text, start: $0.start, end: $0.end, x: $0.position.x, y: $0.position.y, fontFraction: $0.fontFraction) },
+                        margin: webcam.marginFraction, roundness: webcam.roundness, mirror: webcam.mirror,
+                        shadow: webcam.shadow, aspectRatio: webcam.aspectRatio),
+            captions: annotations.map {
+                Cap(text: $0.text, start: $0.start, end: $0.end, x: $0.position.x, y: $0.position.y,
+                    fontFraction: $0.fontFraction, kind: $0.kind.rawValue,
+                    rw: $0.regionSize.width, rh: $0.regionSize.height, blurRadius: $0.blurRadius,
+                    color: $0.colorRGBA, imageB64: $0.imageData?.base64EncodedString())
+            },
+            cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size),
+            captionCues: captionCues.map { CueDTO(text: $0.text, start: $0.start, end: $0.end) },
+            captionsEnabled: captionsEnabled,
             trimStart: trimStart, trimEnd: trimEnd, speed: speed)
     }
 
@@ -94,7 +130,7 @@ struct ReclipProject: Codable, Equatable {
     func zoomTimeline() -> ZoomTimeline {
         ZoomTimeline(regions: zoomRegions.map {
             ZoomRegion(start: $0.start, end: $0.end, scale: CGFloat($0.scale), focus: CGPoint(x: $0.fx, y: $0.fy))
-        })
+        }, ramp: zoomRamp, easing: ZoomEasing(rawValue: zoomEasing) ?? .smooth)
     }
 
     func webcamSettings() -> WebcamSettings {
@@ -102,6 +138,7 @@ struct ReclipProject: Codable, Equatable {
         w.enabled = webcam.enabled
         w.corner = WebcamSettings.Corner(rawValue: webcam.corner) ?? .bottomTrailing
         w.sizeFraction = webcam.size
+        w.aspectRatio = webcam.aspectRatio
         w.marginFraction = webcam.margin
         w.roundness = webcam.roundness
         w.mirror = webcam.mirror
@@ -110,8 +147,28 @@ struct ReclipProject: Codable, Equatable {
     }
 
     func annotationList() -> [Annotation] {
-        captions.map { Annotation(text: $0.text, start: $0.start, end: $0.end,
-                                  position: CGPoint(x: $0.x, y: $0.y), fontFraction: $0.fontFraction) }
+        captions.map { c in
+            var a = Annotation(text: c.text, start: c.start, end: c.end,
+                               position: CGPoint(x: c.x, y: c.y), fontFraction: c.fontFraction)
+            a.kind = Annotation.Kind(rawValue: c.kind) ?? .text
+            a.regionSize = CGSize(width: c.rw, height: c.rh)
+            a.blurRadius = c.blurRadius
+            a.colorRGBA = c.color
+            a.imageData = c.imageB64.flatMap { Data(base64Encoded: $0) }
+            return a
+        }
+    }
+
+    func cursorStyleValue() -> CursorStyle {
+        var cs = CursorStyle()
+        cs.enabled = cursor.enabled
+        cs.kind = CursorStyle.Kind(rawValue: cursor.kind) ?? .arrow
+        cs.size = cursor.size
+        return cs
+    }
+
+    func captionCueList() -> [CaptionCue] {
+        captionCues.map { CaptionCue(text: $0.text, start: $0.start, end: $0.end) }
     }
 
     // MARK: Persistence
