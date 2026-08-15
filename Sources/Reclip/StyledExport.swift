@@ -86,6 +86,29 @@ enum ExportQuality: String, CaseIterable, Identifiable {
     }
 }
 
+/// Output frame-rate presets for the re-encode path (Recordly's 24/30/60).
+enum MP4FrameRate: Int, CaseIterable, Identifiable {
+    case fps24 = 24, fps30 = 30, fps60 = 60
+    var id: Int { rawValue }
+    var label: String { "\(rawValue) fps" }
+}
+
+/// Resolution-aware target bitrate, mirroring Recordly's `exportBitrate` tiers.
+enum ExportBitrate {
+    static let minimum = 2_000_000                      // Recordly MIN_MP4_BITRATE
+    static func base(width: Int, height: Int) -> Int {
+        let px = width * height
+        if px <= 1280 * 720 { return 10_000_000 }
+        if px <= 1920 * 1080 { return 20_000_000 }
+        return 30_000_000
+    }
+    static func mp4(width: Int, height: Int, quality: ExportQuality) -> Int {
+        let mult: Double
+        switch quality { case .high: mult = 1.0; case .medium: mult = 0.6; case .low: mult = 0.3 }
+        return max(minimum, Int(Double(base(width: width, height: height)) * mult))
+    }
+}
+
 enum StyledExport {
 
     /// A playable timeline (trim + speed applied) plus its styled video composition.
@@ -281,6 +304,188 @@ enum StyledExport {
             if case .exporting(let p) = state { progress(p.fractionCompleted) }
         }
         try await running
+    }
+
+    /// Re-encodes through AVAssetReader → AVAssetWriter so the output frame-rate and
+    /// bitrate are set explicitly. (AVAssetExportSession ignores a composition's
+    /// frameDuration override, which is why the preset `export` can't change fps.)
+    static func exportReencoded(source: URL,
+                                to output: URL,
+                                style: StyleOptions,
+                                zoom: ZoomTimeline = ZoomTimeline(),
+                                trim: CMTimeRange? = nil,
+                                webcam: WebcamFrames = WebcamFrames(),
+                                webcamSettings: WebcamSettings = WebcamSettings(),
+                                annotations: [Annotation] = [],
+                                speed: Double = 1.0,
+                                quality: ExportQuality = .high,
+                                frameRate: MP4FrameRate = .fps30,
+                                cursor: CursorTrack? = nil,
+                                cursorStyle: CursorStyle = CursorStyle(),
+                                captions: [CaptionCue] = [],
+                                captionSettings: CaptionSettings = CaptionSettings(),
+                                progress: (@Sendable (Double) -> Void)? = nil) async throws {
+        let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
+                                        webcam: webcam, webcamSettings: webcamSettings,
+                                        annotations: annotations, trim: trim, speed: speed,
+                                        cursor: cursor, cursorStyle: cursorStyle,
+                                        captions: captions, captionSettings: captionSettings)
+        let asset = tl.asset
+        let video = tl.video
+        video.frameDuration = CMTime(value: 1, timescale: CMTimeScale(frameRate.rawValue))
+        let canvas = video.renderSize
+        let totalDuration = tl.duration
+
+        // Reader: pull composed (styled) frames at the requested cadence.
+        let reader = try AVAssetReader(asset: asset)
+        let vTracks = try await asset.loadTracks(withMediaType: .video)
+        let vOut = AVAssetReaderVideoCompositionOutput(videoTracks: vTracks, videoSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)])
+        vOut.videoComposition = video
+        vOut.alwaysCopiesSampleData = false
+        guard reader.canAdd(vOut) else { throw StyledExportError.exportSessionFailed("cannot read video") }
+        reader.add(vOut)
+
+        let aTracks = try await asset.loadTracks(withMediaType: .audio)
+        var aOut: AVAssetReaderAudioMixOutput?
+        if !aTracks.isEmpty {
+            let o = AVAssetReaderAudioMixOutput(audioTracks: aTracks, audioSettings: [
+                AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16,
+                AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+                AVLinearPCMIsNonInterleaved: false, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2])
+            if reader.canAdd(o) { reader.add(o); aOut = o }
+        }
+
+        // Writer: H.264 with an explicit average-bitrate + source-frame-rate hint.
+        try? FileManager.default.removeItem(at: output)
+        let writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
+        let bitrate = ExportBitrate.mp4(width: Int(canvas.width), height: Int(canvas.height), quality: quality)
+        let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: Int(canvas.width), AVVideoHeightKey: Int(canvas.height),
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: bitrate,
+                AVVideoExpectedSourceFrameRateKey: frameRate.rawValue,
+                AVVideoMaxKeyFrameIntervalKey: frameRate.rawValue * 2]])
+        vIn.expectsMediaDataInRealTime = false
+        guard writer.canAdd(vIn) else { throw StyledExportError.exportSessionFailed("cannot write video") }
+        writer.add(vIn)
+        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+            assetWriterInput: vIn,
+            sourcePixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+                kCVPixelBufferWidthKey as String: Int(canvas.width),
+                kCVPixelBufferHeightKey as String: Int(canvas.height)])
+
+        var aIn: AVAssetWriterInput?
+        if aOut != nil {
+            let i = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 128_000])
+            i.expectsMediaDataInRealTime = false
+            if writer.canAdd(i) { writer.add(i); aIn = i }
+        }
+
+        guard writer.startWriting() else {
+            throw StyledExportError.exportSessionFailed(writer.error?.localizedDescription ?? "start failed")
+        }
+        guard reader.startReading() else {
+            throw StyledExportError.exportSessionFailed(reader.error?.localizedDescription ?? "read failed")
+        }
+        writer.startSession(atSourceTime: .zero)
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await pumpResampledVideo(input: vIn, adaptor: adaptor, output: vOut,
+                                         fps: frameRate.rawValue, duration: totalDuration) { t in
+                    if let progress, totalDuration > 0 { progress(min(1, t / totalDuration)) }
+                }
+            }
+            if let aIn, let aOut {
+                group.addTask { await pump(input: aIn, output: aOut, label: "reclip.export.a", onTime: nil) }
+            }
+        }
+        reader.cancelReading()
+        await writer.finishWriting()
+        if writer.status == .failed {
+            throw StyledExportError.exportSessionFailed(writer.error?.localizedDescription ?? "write failed")
+        }
+    }
+
+    /// Resamples composed frames to a fixed output frame-rate: each output slot at
+    /// `k / fps` takes whichever source frame currently applies, so a lower fps drops
+    /// frames and a higher fps duplicates them. This is how the output cadence is
+    /// actually changed (the composition's own frameDuration is ignored by the reader).
+    private static func pumpResampledVideo(input: AVAssetWriterInput,
+                                           adaptor: AVAssetWriterInputPixelBufferAdaptor,
+                                           output: AVAssetReaderOutput,
+                                           fps: Int,
+                                           duration: Double,
+                                           onTime: (@Sendable (Double) -> Void)?) async {
+        let queue = DispatchQueue(label: "reclip.export.v")
+        let interval = 1.0 / Double(fps)
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            var current: CMSampleBuffer?
+            var lookahead: CMSampleBuffer?
+            var boundary = 0.0        // time at which `current` stops applying
+            var outIdx = 0
+            var primed = false
+            var done = false
+            func pts(_ sb: CMSampleBuffer?) -> Double? {
+                sb.map { CMSampleBufferGetPresentationTimeStamp($0).seconds }
+            }
+            input.requestMediaDataWhenReady(on: queue) {
+                if !primed {
+                    current = output.copyNextSampleBuffer()
+                    lookahead = output.copyNextSampleBuffer()
+                    boundary = pts(lookahead) ?? duration
+                    primed = true
+                    if current == nil { input.markAsFinished(); cont.resume(); return }
+                }
+                while input.isReadyForMoreMediaData {
+                    if done { input.markAsFinished(); cont.resume(); return }
+                    let outTime = Double(outIdx) * interval
+                    let atTail = lookahead == nil
+                    if outTime < boundary - 1e-9 || (atTail && outTime <= duration + 1e-9) {
+                        if let cur = current, let pb = CMSampleBufferGetImageBuffer(cur) {
+                            adaptor.append(pb, withPresentationTime:
+                                            CMTime(seconds: outTime, preferredTimescale: 600))
+                            onTime?(outTime)
+                        }
+                        outIdx += 1
+                    } else if atTail {
+                        done = true
+                    } else {
+                        current = lookahead
+                        lookahead = output.copyNextSampleBuffer()
+                        boundary = pts(lookahead) ?? duration
+                    }
+                }
+            }
+        }
+    }
+
+    /// Drains one reader output into one writer input, resuming when the stream ends.
+    private static func pump(input: AVAssetWriterInput,
+                             output: AVAssetReaderOutput,
+                             label: String,
+                             onTime: (@Sendable (Double) -> Void)?) async {
+        let queue = DispatchQueue(label: label)
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            input.requestMediaDataWhenReady(on: queue) {
+                while input.isReadyForMoreMediaData {
+                    guard let sb = output.copyNextSampleBuffer() else {
+                        input.markAsFinished(); cont.resume(); return
+                    }
+                    let t = CMSampleBufferGetPresentationTimeStamp(sb).seconds
+                    if input.append(sb) {
+                        onTime?(t)
+                    } else {
+                        input.markAsFinished(); cont.resume(); return
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Compositing

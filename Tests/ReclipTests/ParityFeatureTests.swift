@@ -56,6 +56,19 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertGreaterThan(d, 0.5)
     }
 
+    /// Counts decoded video frames in a file (ground truth for the output frame-rate).
+    private func frameCount(_ url: URL) async throws -> Int {
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .video).first else { return 0 }
+        let reader = try AVAssetReader(asset: asset)
+        let out = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)])
+        reader.add(out); reader.startReading()
+        var n = 0
+        while reader.status == .reading, out.copyNextSampleBuffer() != nil { n += 1 }
+        return n
+    }
+
     func testCropExports() async throws {
         let src = tmp("crop-src.mp4"); try await makeVideo(src)
         let out = tmp("crop.mp4")
@@ -191,6 +204,46 @@ final class ParityFeatureTests: XCTestCase {
         let out = tmp("img.mp4")
         try await StyledExport.export(source: src, to: out, style: StyleOptions(), annotations: [ann])
         try await assertValid(out)
+    }
+
+    func testBitrateTiers() {
+        XCTAssertEqual(ExportBitrate.base(width: 1280, height: 720), 10_000_000)
+        XCTAssertEqual(ExportBitrate.base(width: 1920, height: 1080), 20_000_000)
+        XCTAssertEqual(ExportBitrate.base(width: 3840, height: 2160), 30_000_000)
+        XCTAssertEqual(ExportBitrate.mp4(width: 1920, height: 1080, quality: .high), 20_000_000)
+        XCTAssertLessThan(ExportBitrate.mp4(width: 1920, height: 1080, quality: .low),
+                          ExportBitrate.mp4(width: 1920, height: 1080, quality: .high))
+        XCTAssertGreaterThanOrEqual(ExportBitrate.mp4(width: 320, height: 240, quality: .low),
+                                    ExportBitrate.minimum)   // never below the floor
+    }
+
+    /// The re-encode path must actually change the output frame-rate — this is the gap
+    /// the preset exporter couldn't close, so it's verified by counting real frames.
+    func testReencodedFrameRateIsApplied() async throws {
+        let src = tmp("fps-src.mp4")
+        try await makeVideo(src, size: CGSize(width: 640, height: 400), seconds: 2.0, fps: 30)
+        for target in [MP4FrameRate.fps24, .fps60] {
+            let out = tmp("fps-\(target.rawValue).mp4")
+            try await StyledExport.exportReencoded(source: src, to: out, style: StyleOptions(),
+                                                   frameRate: target)
+            try await assertValid(out)
+            let count = try await frameCount(out)
+            let dur = try await AVURLAsset(url: out).load(.duration).seconds
+            let fps = Double(count) / dur
+            XCTAssertEqual(fps, Double(target.rawValue), accuracy: 4,
+                           "expected ~\(target.rawValue)fps, got \(fps) (\(count) frames / \(dur)s)")
+        }
+    }
+
+    func testReencodedWithStyleAndAudioIsValid() async throws {
+        let src = tmp("reenc-src.mp4"); try await makeVideo(src)
+        var s = StyleOptions(); s.aspect = .square; s.backgroundBlur = 3
+        let out = tmp("reenc.mp4")
+        try await StyledExport.exportReencoded(source: src, to: out, style: s,
+                                               quality: .medium, frameRate: .fps30)
+        try await assertValid(out)
+        let d = try await dims(out)
+        XCTAssertEqual(d.width, d.height, accuracy: 4, "square aspect survives the re-encode path")
     }
 
     func testCaptionRenderExports() async throws {
