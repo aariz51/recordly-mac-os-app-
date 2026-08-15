@@ -1,6 +1,8 @@
 import XCTest
 import AVFoundation
 import ScreenCaptureKit
+import ImageIO
+import CoreGraphics
 @testable import Reclip
 
 /// End-to-end capture test driving the real `ScreenRecorder` against a live display.
@@ -102,5 +104,50 @@ final class CaptureIntegrationTests: XCTestCase {
         try await StyledExport.exportReencoded(source: src, to: reenc, style: style, zoom: zoom, frameRate: .fps30)
         let reencDur = try await AVURLAsset(url: reenc).load(.duration).seconds
         XCTAssertGreaterThan(reencDur, 0.5, "re-encode of real footage should be valid")
+    }
+
+    /// Records with the cursor sampler running, then exports with the cursor track + a
+    /// blur annotation + a burned-in caption — the full overlay stack on real footage.
+    @MainActor
+    func testCaptureThenOverlaysAndGif() async throws {
+        try XCTSkipUnless(PermissionStatus.screenRecording() == .authorized, "screen-recording not granted")
+
+        // Record with the cursor sampler active (ScreenRecorder starts it), so a real
+        // cursor sidecar track is written next to the movie.
+        let rec = ScreenRecorder()
+        let displays = try await rec.availableDisplays()
+        let display = try XCTUnwrap(displays.first)
+        let src = FileManager.default.temporaryDirectory.appendingPathComponent("reclip-ov-\(UUID().uuidString).mp4")
+        rec.captureSystemAudio = false; rec.captureMicrophone = false; rec.captureWebcam = false
+        try await rec.start(source: .display(display.displayID), to: src)
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        try await rec.stop()
+        defer { try? FileManager.default.removeItem(at: src) }
+
+        // Load the real cursor track the recorder saved beside the movie.
+        let cursorTrack = CursorTrack.load(besides: src)
+        var cursorStyle = CursorStyle(); cursorStyle.enabled = true; cursorStyle.kind = .arrow
+
+        var blur = Annotation(text: "", start: 0.2, end: 1.5)
+        blur.kind = .blur; blur.position = CGPoint(x: 0.3, y: 0.3)
+        blur.regionSize = CGSize(width: 0.2, height: 0.15); blur.blurRadius = 28
+        let cues = [CaptionCue(text: "Recorded on device", start: 0.2, end: 1.8)]
+        var caps = CaptionSettings(); caps.enabled = true
+
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("reclip-ov-out-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: out) }
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(),
+                                      annotations: [blur], cursor: cursorTrack, cursorStyle: cursorStyle,
+                                      captions: cues, captionSettings: caps)
+        let ovDur = try await AVURLAsset(url: out).load(.duration).seconds
+        XCTAssertGreaterThan(ovDur, 0.5, "overlay export of real footage should be valid")
+
+        // GIF from real footage.
+        let gif = FileManager.default.temporaryDirectory.appendingPathComponent("reclip-ov-\(UUID().uuidString).gif")
+        defer { try? FileManager.default.removeItem(at: gif) }
+        try await GifExport.export(source: src, to: gif, style: StyleOptions(), fps: 8, maxWidth: GifSize.medium.maxWidth)
+        let gifSource = CGImageSourceCreateWithURL(gif as CFURL, nil)
+        XCTAssertNotNil(gifSource)
+        XCTAssertGreaterThan(CGImageSourceGetCount(gifSource!), 1, "GIF from real footage should have frames")
     }
 }
