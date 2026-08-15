@@ -198,6 +198,32 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class FocusUtilsTests: XCTestCase {
+    func testClampIsNoOpForCentre() {
+        let f = FocusUtils.clampFocusToScale(CGPoint(x: 0.5, y: 0.5), scale: 2)
+        XCTAssertEqual(f.x, 0.5, accuracy: 1e-9); XCTAssertEqual(f.y, 0.5, accuracy: 1e-9)
+        // Focus already inside bounds is unchanged.
+        let g = FocusUtils.clampFocusToScale(CGPoint(x: 0.4, y: 0.6), scale: 2.2)
+        XCTAssertEqual(g.x, 0.4, accuracy: 1e-9); XCTAssertEqual(g.y, 0.6, accuracy: 1e-9)
+    }
+
+    func testEdgeFocusPulledIn() {
+        // scale 2 → margin 0.25 → bounds [0.25, 0.75].
+        let f = FocusUtils.clampFocusToScale(CGPoint(x: 0.0, y: 1.0), scale: 2)
+        XCTAssertEqual(f.x, 0.25, accuracy: 1e-9); XCTAssertEqual(f.y, 0.75, accuracy: 1e-9)
+        // scale 4 → margin 0.125 → bounds [0.125, 0.875].
+        let g = FocusUtils.clampFocusToScale(CGPoint(x: 0.9, y: 0.1), scale: 4)
+        XCTAssertEqual(g.x, 0.875, accuracy: 1e-9); XCTAssertEqual(g.y, 0.125, accuracy: 1e-9)
+    }
+
+    func testHigherScaleTightensBounds() {
+        let b2 = FocusUtils.focusBounds(scale: 2)
+        let b4 = FocusUtils.focusBounds(scale: 4)
+        XCTAssertGreaterThan(b2.minX, 0); XCTAssertLessThan(b4.minX, b2.minX,
+            "higher zoom → tighter focus bounds (viewport shrinks)")
+    }
+}
+
 final class ShortcutsTests: XCTestCase {
     func testMatchesRespectsModifiers() {
         // addZoom = "z" with no primary modifier.

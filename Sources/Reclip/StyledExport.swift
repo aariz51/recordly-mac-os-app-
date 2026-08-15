@@ -281,9 +281,12 @@ enum StyledExport {
     /// Scales the frame around a normalized (top-left origin) focus point, keeping the original extent.
     private static func applyZoom(_ image: CIImage, scale: CGFloat, focus: CGPoint, canvas: CGSize) -> CIImage {
         guard scale > 1.0001 else { return image }
+        // Keep the zoom viewport inside the frame (Recordly's clampFocusToScale); a no-op
+        // for centred focuses, but prevents a corner-biased zoom from running off the edge.
+        let clampedFocus = FocusUtils.clampFocusToScale(focus, scale: scale)
         let extent = image.extent
-        let fx = extent.minX + focus.x * extent.width
-        let fy = extent.minY + (1.0 - focus.y) * extent.height   // top-left -> CI bottom-left
+        let fx = extent.minX + clampedFocus.x * extent.width
+        let fy = extent.minY + (1.0 - clampedFocus.y) * extent.height   // top-left -> CI bottom-left
         let t = CGAffineTransform(translationX: fx, y: fy)
             .scaledBy(x: scale, y: scale)
             .translatedBy(x: -fx, y: -fy)
