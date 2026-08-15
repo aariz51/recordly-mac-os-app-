@@ -3,31 +3,44 @@ import ScreenCaptureKit
 
 struct ContentView: View {
     @StateObject private var recorder = ScreenRecorder()
+
+    enum SourceKind: String, CaseIterable, Identifiable {
+        case display = "Display"
+        case window = "Window"
+        var id: String { rawValue }
+    }
+
+    @State private var sourceKind: SourceKind = .display
     @State private var displays: [SCDisplay] = []
+    @State private var windows: [SCWindow] = []
     @State private var selectedDisplayID: CGDirectDisplayID?
+    @State private var selectedWindowID: CGWindowID?
     @State private var statusMessage = "Ready to record."
     @State private var lastSavedURL: URL?
 
-    private var selectedDisplay: SCDisplay? {
-        displays.first { $0.displayID == selectedDisplayID }
-    }
-
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 18) {
             header
 
             GroupBox {
                 VStack(alignment: .leading, spacing: 14) {
-                    Picker("Display", selection: $selectedDisplayID) {
-                        ForEach(displays, id: \.displayID) { d in
-                            Text("Display \(d.displayID) — \(d.width)×\(d.height)")
-                                .tag(Optional(d.displayID))
-                        }
+                    Picker("", selection: $sourceKind) {
+                        ForEach(SourceKind.allCases) { Text($0.rawValue).tag($0) }
                     }
-                    Toggle("Capture system audio", isOn: $recorder.captureSystemAudio)
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .disabled(recorder.isRecording)
+
+                    sourcePicker
+
+                    Divider()
+
+                    Toggle("System audio", isOn: $recorder.captureSystemAudio)
+                        .disabled(recorder.isRecording)
+                    Toggle("Microphone", isOn: $recorder.captureMicrophone)
                         .disabled(recorder.isRecording)
                 }
-                .padding(6)
+                .padding(8)
             }
 
             recordControls
@@ -46,23 +59,40 @@ struct ContentView: View {
                 }
                 .buttonStyle(.link)
             }
-
             Spacer()
         }
         .padding(24)
-        .task { await loadDisplays() }
+        .task { await refreshSources() }
+        .onChange(of: sourceKind) { Task { await refreshSources() } }
     }
 
     private var header: some View {
         VStack(spacing: 4) {
             Image(systemName: "record.circle")
-                .font(.system(size: 40))
+                .font(.system(size: 38))
                 .foregroundStyle(.pink)
-            Text("Reclip")
-                .font(.title.bold())
-            Text("Screen recorder")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Text("Reclip").font(.title.bold())
+            Text("Screen recorder").font(.subheadline).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var sourcePicker: some View {
+        switch sourceKind {
+        case .display:
+            Picker("Display", selection: $selectedDisplayID) {
+                ForEach(displays, id: \.displayID) { d in
+                    Text("Display \(d.displayID) — \(d.width)×\(d.height)").tag(Optional(d.displayID))
+                }
+            }
+            .disabled(recorder.isRecording)
+        case .window:
+            Picker("Window", selection: $selectedWindowID) {
+                ForEach(windows, id: \.windowID) { w in
+                    Text(windowLabel(w)).tag(Optional(w.windowID))
+                }
+            }
+            .disabled(recorder.isRecording)
         }
     }
 
@@ -73,48 +103,65 @@ struct ContentView: View {
                 Text(timeString(recorder.elapsed))
                     .font(.system(size: 30, weight: .semibold, design: .monospaced))
                     .foregroundStyle(.pink)
-                Button(role: .destructive) {
-                    Task { await stop() }
-                } label: {
-                    Label("Stop Recording", systemImage: "stop.fill")
-                        .frame(maxWidth: .infinity)
+                Button(role: .destructive) { Task { await stop() } } label: {
+                    Label("Stop Recording", systemImage: "stop.fill").frame(maxWidth: .infinity)
                 }
                 .controlSize(.large)
             }
         } else {
-            Button {
-                Task { await start() }
-            } label: {
-                Label("Start Recording", systemImage: "record.circle.fill")
-                    .frame(maxWidth: .infinity)
+            Button { Task { await start() } } label: {
+                Label("Start Recording", systemImage: "record.circle.fill").frame(maxWidth: .infinity)
             }
             .controlSize(.large)
             .buttonStyle(.borderedProminent)
             .tint(.pink)
-            .disabled(selectedDisplay == nil)
+            .disabled(!hasSelection)
+        }
+    }
+
+    private var hasSelection: Bool {
+        switch sourceKind {
+        case .display: return selectedDisplayID != nil
+        case .window: return selectedWindowID != nil
         }
     }
 
     // MARK: - Actions
 
-    private func loadDisplays() async {
+    private func refreshSources() async {
         do {
-            let list = try await recorder.availableDisplays()
-            displays = list
-            if selectedDisplayID == nil { selectedDisplayID = list.first?.displayID }
-            statusMessage = list.isEmpty
-                ? "No displays found. Grant Screen Recording permission in System Settings."
-                : "Ready to record."
+            switch sourceKind {
+            case .display:
+                let list = try await recorder.availableDisplays()
+                displays = list
+                if selectedDisplayID == nil || !list.contains(where: { $0.displayID == selectedDisplayID }) {
+                    selectedDisplayID = list.first?.displayID
+                }
+                statusMessage = list.isEmpty
+                    ? "No displays found. Grant Screen Recording permission in System Settings."
+                    : "Ready to record."
+            case .window:
+                let list = try await recorder.availableWindows()
+                windows = list
+                if selectedWindowID == nil || !list.contains(where: { $0.windowID == selectedWindowID }) {
+                    selectedWindowID = list.first?.windowID
+                }
+                statusMessage = list.isEmpty ? "No windows available." : "Ready to record."
+            }
         } catch {
-            statusMessage = "Could not list displays: \(error.localizedDescription)"
+            statusMessage = "Could not list sources: \(error.localizedDescription)"
         }
     }
 
     private func start() async {
-        guard let display = selectedDisplay else { return }
-        let url = defaultOutputURL()
+        let source: CaptureSource?
+        switch sourceKind {
+        case .display: source = selectedDisplayID.map { .display($0) }
+        case .window: source = selectedWindowID.map { .window($0) }
+        }
+        guard let source else { return }
         do {
-            try await recorder.start(display: display, to: url)
+            try await recorder.start(source: source, to: defaultOutputURL())
             statusMessage = "Recording…"
         } catch {
             statusMessage = "Failed to start: \(error.localizedDescription)"
@@ -131,11 +178,16 @@ struct ContentView: View {
         }
     }
 
+    private func windowLabel(_ w: SCWindow) -> String {
+        let app = w.owningApplication?.applicationName ?? "App"
+        let title = w.title ?? ""
+        return title.isEmpty ? app : "\(app) — \(title)"
+    }
+
     private func defaultOutputURL() -> URL {
         let movies = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
             ?? FileManager.default.homeDirectoryForCurrentUser
-        let stamp = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         return movies.appendingPathComponent("Reclip-\(stamp).mp4")
     }
 
