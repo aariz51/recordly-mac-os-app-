@@ -198,6 +198,38 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class WebcamSyncTests: XCTestCase {
+    func testTargetTimeShiftsByOffsetAndClamps() {
+        // 500ms offset shifts the webcam back half a second.
+        XCTAssertEqual(WebcamSync.targetTimeSeconds(currentTime: 5, webcamDuration: 10, timeOffsetMs: 500),
+                       4.5, accuracy: 1e-9)
+        // Clamped to the webcam duration.
+        XCTAssertEqual(WebcamSync.targetTimeSeconds(currentTime: 5, webcamDuration: 4, timeOffsetMs: 0),
+                       4, accuracy: 1e-9)
+        // Nil duration → no clamp (negative offset can push past current time).
+        XCTAssertEqual(WebcamSync.targetTimeSeconds(currentTime: 5, webcamDuration: nil, timeOffsetMs: -1000),
+                       6, accuracy: 1e-9)
+    }
+
+    func testShouldSeek() {
+        // Actively seeking → never trigger another seek.
+        XCTAssertFalse(WebcamSync.shouldSeek(desiredTime: 5, isPlaying: true, isSeeking: true,
+                                             previousTimelineTime: 1, timelineTime: 9, webcamCurrentTime: 1))
+        // First frame (nil previous) counts as a jump → seek.
+        XCTAssertTrue(WebcamSync.shouldSeek(desiredTime: 5, isPlaying: true, isSeeking: false,
+                                            previousTimelineTime: nil, timelineTime: 5, webcamCurrentTime: 5))
+        // In sync while playing (drift below 0.35) → no seek.
+        XCTAssertFalse(WebcamSync.shouldSeek(desiredTime: 5, isPlaying: true, isSeeking: false,
+                                             previousTimelineTime: 4.9, timelineTime: 5, webcamCurrentTime: 4.8))
+        // Large drift while playing → seek.
+        XCTAssertTrue(WebcamSync.shouldSeek(desiredTime: 5, isPlaying: true, isSeeking: false,
+                                            previousTimelineTime: 4.9, timelineTime: 5, webcamCurrentTime: 3))
+        // Paused uses a tight 0.01 threshold.
+        XCTAssertTrue(WebcamSync.shouldSeek(desiredTime: 5, isPlaying: false, isSeeking: false,
+                                            previousTimelineTime: 5, timelineTime: 5, webcamCurrentTime: 5.02))
+    }
+}
+
 final class FocusUtilsTests: XCTestCase {
     func testClampIsNoOpForCentre() {
         let f = FocusUtils.clampFocusToScale(CGPoint(x: 0.5, y: 0.5), scale: 2)
