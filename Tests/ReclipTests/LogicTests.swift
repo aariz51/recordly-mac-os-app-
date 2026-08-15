@@ -198,6 +198,42 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class ZoomTransformTests: XCTestCase {
+    let stage = ZoomTransform.Size(width: 1000, height: 1000)
+    let mask = ZoomTransform.Rect(x: 0, y: 0, width: 1000, height: 1000)
+
+    func testCentersFocusAndScales() {
+        let t = ZoomTransform.compute(stage: stage, baseMask: mask, zoomScale: 2,
+                                      progress: 1, focusX: 0.5, focusY: 0.5)
+        XCTAssertEqual(t.scale, 2, accuracy: 1e-9)
+        XCTAssertEqual(t.x, -500, accuracy: 1e-9)   // 500 − 500·2
+        XCTAssertEqual(t.y, -500, accuracy: 1e-9)
+    }
+
+    func testProgressZeroIsIdentity() {
+        let t = ZoomTransform.compute(stage: stage, baseMask: mask, zoomScale: 3,
+                                      progress: 0, focusX: 0.2, focusY: 0.8)
+        XCTAssertEqual(t, ZoomTransform(scale: 1, x: 0, y: 0))
+    }
+
+    func testDegenerateStageIsIdentity() {
+        let t = ZoomTransform.compute(stage: .init(width: 0, height: 0), baseMask: mask,
+                                      zoomScale: 2, focusX: 0.5, focusY: 0.5)
+        XCTAssertEqual(t, ZoomTransform(scale: 1, x: 0, y: 0))
+    }
+
+    func testFocusRoundTrips() {
+        for (fx, fy, z) in [(0.3, 0.7, 2.0), (0.1, 0.9, 3.5), (0.5, 0.5, 1.5)] {
+            let t = ZoomTransform.compute(stage: stage, baseMask: mask, zoomScale: z,
+                                          progress: 1, focusX: fx, focusY: fy)
+            let f = ZoomTransform.focusFromTransform(stage: stage, baseMask: mask,
+                                                     zoomScale: z, x: t.x, y: t.y)
+            XCTAssertEqual(f.cx, fx, accuracy: 1e-9)
+            XCTAssertEqual(f.cy, fy, accuracy: 1e-9)
+        }
+    }
+}
+
 final class CursorClickEffectTests: XCTestCase {
     func testBounceDurationClamped() {
         XCTAssertEqual(CursorClickEffect.clampBounceDuration(30), 60, accuracy: 1e-9)
