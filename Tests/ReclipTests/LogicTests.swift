@@ -198,6 +198,26 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class PermissionStatusTests: XCTestCase {
+    func testStatusMappingIsTotal() {
+        // Every AVAuthorizationStatus maps to a CapturePermission (no crash / default).
+        XCTAssertEqual(CapturePermission.fromAVStatus(.authorized), .authorized)
+        XCTAssertEqual(CapturePermission.fromAVStatus(.denied), .denied)
+        XCTAssertEqual(CapturePermission.fromAVStatus(.restricted), .restricted)
+        XCTAssertEqual(CapturePermission.fromAVStatus(.notDetermined), .notDetermined)
+    }
+
+    func testPreflightReturnsWithoutPrompting() {
+        // These must return a defined status synchronously (no prompt, no crash).
+        let all: [CapturePermission] = [PermissionStatus.screenRecording(),
+                                        PermissionStatus.camera(),
+                                        PermissionStatus.microphone()]
+        for p in all {
+            XCTAssertTrue([.authorized, .denied, .notDetermined, .restricted].contains(p))
+        }
+    }
+}
+
 final class AudioLevelMeterTests: XCTestCase {
     func testRMS() {
         XCTAssertEqual(AudioLevelMeter.rms([]), 0, accuracy: 1e-9)
