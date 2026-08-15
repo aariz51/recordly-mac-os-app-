@@ -102,12 +102,14 @@ sway, loop mode, motion presets. **Visual look needs your review** (can't verify
 | **Advanced per-side / vertical padding** | ❌ | — |
 
 ## 7. Auto-captions  🟡 (rendering half landed)
-Reclip now renders styled burned-in caption pills, exports **SRT + VTT** sidecars, and
-**wires Whisper transcription** — 16kHz WAV extraction + whisper-cli orchestration + SRT
-parsing (all parse/format tested; the model-run itself needs a ggml model + real audio,
-verified on-device). Still missing: model download/management UI, 10-language selection,
-inline caption editing, karaoke word-highlighting, and (for App Store) linking whisper.cpp
-as a library instead of a subprocess.
+Reclip now renders styled burned-in caption pills, exports **SRT + VTT** sidecars,
+**wires Whisper transcription** (16kHz WAV extraction + whisper-cli orchestration + SRT
+parsing — model-run needs a ggml model + real audio, verified on-device), ships **10-language
+selection + model management** (`WhisperLanguage`/`WhisperModel`, download/cache), and now
+**word-level cue timing** (`CaptionEditing` — text normalization + even word distribution,
+the karaoke-highlight foundation). Still missing: the caption *editing UI*, karaoke
+*rendering* (needs your eyes on the animation), and (for App Store) linking whisper.cpp as a
+library instead of a subprocess.
 
 ## 8. Export
 | Feature | Reclip | Note |
