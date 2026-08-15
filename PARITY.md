@@ -27,11 +27,13 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Live REC timer | ✅ | elapsed, now backed by RecordingClock |
 | **Countdown timer (3/5/10s)** | ✅ | `Countdown` model (remaining/finished) unit-tested; UI hookup pending |
 | Microphone capture | ✅ | captureMicrophone |
-| **Mic device selection + level meter** | ❌ | default device only |
+| **Mic device selection** | ✅ | `DeviceEnumerator.microphones()` + `microphoneDeviceID`; manually verified finding real devices on-device |
+| **Mic level meter** | 🟡 | RMS/peak math ported + tested (`AudioLevelMeter`); live tap needs mic permission |
 | **Mic processing profiles** | ❌ | raw only |
 | System audio | ✅ | captureSystemAudio |
 | Webcam capture | ✅ | sidecar |
-| **Webcam device selection + live preview** | ❌ | default device only |
+| **Webcam device selection** | ✅ | `DeviceEnumerator.cameras()` + `webcamDeviceID`; manually verified (built-in + Continuity cameras found) |
+| Webcam live preview | ❌ | needs capture-session preview layer |
 | **Floating HUD control bar** | ❌ | — |
 | Cursor position telemetry | ✅ | CursorSampler |
 | **Cursor click/interaction capture** | ❌ | position only |

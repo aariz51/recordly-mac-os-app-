@@ -198,6 +198,40 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class AudioLevelMeterTests: XCTestCase {
+    func testRMS() {
+        XCTAssertEqual(AudioLevelMeter.rms([]), 0, accuracy: 1e-9)
+        XCTAssertEqual(AudioLevelMeter.rms([0, 0, 0]), 0, accuracy: 1e-9)
+        XCTAssertEqual(AudioLevelMeter.rms([1, -1, 1, -1]), 1, accuracy: 1e-9)     // full-scale square
+        XCTAssertEqual(AudioLevelMeter.rms([0.5, 0.5, 0.5]), 0.5, accuracy: 1e-9)
+    }
+
+    func testNormalizeWithGainAndClamp() {
+        XCTAssertEqual(AudioLevelMeter.normalize(rms: 0), 0, accuracy: 1e-9)
+        XCTAssertEqual(AudioLevelMeter.normalize(rms: 0.25), 50, accuracy: 1e-9)   // 0.25·200
+        XCTAssertEqual(AudioLevelMeter.normalize(rms: 0.5), 100, accuracy: 1e-9)   // 2× gain saturates
+        XCTAssertEqual(AudioLevelMeter.normalize(rms: 1.0), 100, accuracy: 1e-9)   // clamped
+    }
+
+    func testSmoothingConvergesAndSilenceDecays() {
+        var m = AudioLevelMeter(smoothingFactor: 0.8)
+        // Silence stays ~0.
+        for _ in 0..<10 { m.update(samples: [0, 0, 0, 0]) }
+        XCTAssertEqual(m.level, 0, accuracy: 1e-9)
+        // Full-scale input converges up toward 100 (smoothed, not instant).
+        var loud = m
+        let first = loud.update(samples: [1, -1, 1, -1])   // 0·0.8 + 100·0.2 = 20
+        XCTAssertEqual(first, 20, accuracy: 1e-9)
+        for _ in 0..<60 { loud.update(samples: [1, -1, 1, -1]) }
+        XCTAssertEqual(loud.level, 100, accuracy: 0.5)
+        // Then silence decays back down.
+        for _ in 0..<60 { loud.update(samples: [0, 0, 0, 0]) }
+        XCTAssertEqual(loud.level, 0, accuracy: 0.5)
+        loud.reset()
+        XCTAssertEqual(loud.level, 0, accuracy: 1e-12)
+    }
+}
+
 final class DeviceEnumeratorTests: XCTestCase {
     func testEnumerationReturnsWellFormedLists() {
         // Enumeration must never crash and every entry must be addressable (non-empty
