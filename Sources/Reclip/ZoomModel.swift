@@ -10,10 +10,30 @@ struct ZoomRegion: Identifiable, Equatable {
     var focus: CGPoint      // normalized 0...1, top-left origin
 }
 
+/// Ramp curves for how a zoom eases in and out.
+enum ZoomEasing: String, CaseIterable, Identifiable {
+    case linear
+    case smooth   // smoothstep
+    case glide    // smootherstep (gentler)
+    case snappy   // ease-out cubic (fast in, settle)
+    var id: String { rawValue }
+
+    func apply(_ x: Double) -> CGFloat {
+        let c = min(max(x, 0), 1)
+        switch self {
+        case .linear: return CGFloat(c)
+        case .smooth: return CGFloat(c * c * (3 - 2 * c))
+        case .glide:  return CGFloat(c * c * c * (c * (c * 6 - 15) + 10))
+        case .snappy: return CGFloat(1 - pow(1 - c, 3))
+        }
+    }
+}
+
 /// Evaluates the active zoom (scale + focus) at any time, with eased in/out ramps.
 struct ZoomTimeline: Equatable {
     var regions: [ZoomRegion] = []
     var ramp: Double = 0.5   // seconds to ease in and out
+    var easing: ZoomEasing = .smooth
 
     /// Returns scale (1 = no zoom) and focus point at time `t`.
     func value(at t: Double) -> (scale: CGFloat, focus: CGPoint) {
@@ -22,14 +42,9 @@ struct ZoomTimeline: Equatable {
         }
         let inRamp = min(1.0, (t - r.start) / max(ramp, 0.001))
         let outRamp = min(1.0, (r.end - t) / max(ramp, 0.001))
-        let env = ease(min(inRamp, outRamp))
+        let env = easing.apply(min(inRamp, outRamp))
         let scale = 1.0 + (r.scale - 1.0) * env
         return (scale, r.focus)
-    }
-
-    private func ease(_ x: Double) -> CGFloat {
-        let c = min(max(x, 0), 1)
-        return CGFloat(c * c * (3 - 2 * c))   // smoothstep
     }
 
     /// Build zoom regions automatically from cursor dwell clusters.

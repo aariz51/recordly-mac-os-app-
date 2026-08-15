@@ -12,6 +12,23 @@ final class ZoomTimelineTests: XCTestCase {
         XCTAssertEqual(tl.value(at: 6).scale, 1.0, accuracy: 0.001)
     }
 
+    func testEasingCurvesAreDistinctAndBounded() {
+        let x = 0.25
+        let lin = ZoomEasing.linear.apply(x)
+        let smo = ZoomEasing.smooth.apply(x)
+        let gli = ZoomEasing.glide.apply(x)
+        let sna = ZoomEasing.snappy.apply(x)
+        XCTAssertEqual(lin, 0.25, accuracy: 0.001)
+        XCTAssertLessThan(smo, lin, "smooth eases in below linear in the first half")
+        XCTAssertLessThan(gli, smo, "glide is gentler than smooth")
+        XCTAssertGreaterThan(sna, lin, "snappy (ease-out) is ahead of linear")
+        // Every curve is pinned at the endpoints.
+        for e in ZoomEasing.allCases {
+            XCTAssertEqual(e.apply(0), 0, accuracy: 1e-9)
+            XCTAssertEqual(e.apply(1), 1, accuracy: 1e-9)
+        }
+    }
+
     func testFullZoomMidRegion() {
         let tl = ZoomTimeline(regions: [
             ZoomRegion(start: 0, end: 10, scale: 2, focus: CGPoint(x: 0.3, y: 0.4))
