@@ -142,3 +142,41 @@ final class CaptionExportTests: XCTestCase {
         XCTAssertEqual(CaptionExport.timecode(0, sep: "."), "00:00:00.000")
     }
 }
+
+final class WhisperTranscriberTests: XCTestCase {
+    func testSRTParseRoundTrip() {
+        let cues = [CaptionCue(text: "Hello world", start: 1.0, end: 3.5),
+                    CaptionCue(text: "Second line", start: 4.0, end: 5.25)]
+        let parsed = WhisperTranscriber.parseSRT(CaptionExport.srt(cues))
+        XCTAssertEqual(parsed.count, 2)
+        XCTAssertEqual(parsed.first?.text, "Hello world")
+        XCTAssertEqual(parsed.first?.start ?? -1, 1.0, accuracy: 0.001)
+        XCTAssertEqual(parsed.first?.end ?? -1, 3.5, accuracy: 0.001)
+        XCTAssertEqual(parsed.last?.text, "Second line")
+        XCTAssertEqual(parsed.last?.end ?? -1, 5.25, accuracy: 0.001)
+    }
+
+    func testTimecodeParse() {
+        XCTAssertEqual(WhisperTranscriber.timecode("01:02:03,500"), 3723.5, accuracy: 0.001)
+        XCTAssertEqual(WhisperTranscriber.timecode("00:00:00.000"), 0, accuracy: 0.001)
+    }
+
+    func testWavHeader() {
+        let pcm = Data(repeating: 7, count: 320)   // 160 int16 samples
+        let wav = WhisperTranscriber.wavData(pcm: pcm, sampleRate: 16000, channels: 1, bitsPerSample: 16)
+        XCTAssertEqual(wav.count, 44 + 320)
+        XCTAssertEqual(String(data: wav.subdata(in: 0..<4), encoding: .ascii), "RIFF")
+        XCTAssertEqual(String(data: wav.subdata(in: 8..<12), encoding: .ascii), "WAVE")
+        XCTAssertEqual(String(data: wav.subdata(in: 36..<40), encoding: .ascii), "data")
+    }
+
+    func testTranscribeThrowsWhenBinaryMissing() async {
+        do {
+            _ = try await WhisperTranscriber.transcribe(
+                video: URL(fileURLWithPath: "/tmp/none.mp4"),
+                binary: URL(fileURLWithPath: "/tmp/no-whisper-\(UUID().uuidString)"),
+                model: URL(fileURLWithPath: "/tmp/no-model"))
+            XCTFail("expected a thrown error for a missing binary")
+        } catch { /* expected */ }
+    }
+}
