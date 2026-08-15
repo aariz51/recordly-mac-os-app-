@@ -198,6 +198,43 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class ShortcutsTests: XCTestCase {
+    func testMatchesRespectsModifiers() {
+        // addZoom = "z" with no primary modifier.
+        XCTAssertTrue(Shortcuts.matches(KeyChord(key: "z"), Shortcuts.defaults[.addZoom]!))
+        XCTAssertTrue(Shortcuts.matches(KeyChord(key: "Z"), Shortcuts.defaults[.addZoom]!), "case-insensitive")
+        // deleteSelected = Cmd+d — requires the primary modifier.
+        XCTAssertTrue(Shortcuts.matches(KeyChord(key: "d", primaryModifier: true), Shortcuts.defaults[.deleteSelected]!))
+        XCTAssertFalse(Shortcuts.matches(KeyChord(key: "d"), Shortcuts.defaults[.deleteSelected]!), "no modifier → no match")
+    }
+
+    func testFindConflictConfigurableAndFixed() {
+        // Rebinding splitClip to "z" collides with addZoom (configurable).
+        XCTAssertEqual(Shortcuts.findConflict(ShortcutBinding(key: "z"), forAction: .splitClip, config: Shortcuts.defaults),
+                       .configurable(.addZoom))
+        // Rebinding addZoom to Tab collides with a fixed shortcut.
+        XCTAssertEqual(Shortcuts.findConflict(ShortcutBinding(key: "tab"), forAction: .addZoom, config: Shortcuts.defaults),
+                       .fixed("Cycle Annotations Forward"))
+        // A free key has no conflict; a binding equal to its own action isn't a self-conflict.
+        XCTAssertNil(Shortcuts.findConflict(ShortcutBinding(key: "q"), forAction: .addZoom, config: Shortcuts.defaults))
+        XCTAssertNil(Shortcuts.findConflict(ShortcutBinding(key: "z"), forAction: .addZoom, config: Shortcuts.defaults))
+    }
+
+    func testFormatBinding() {
+        XCTAssertEqual(Shortcuts.formatBinding(ShortcutBinding(key: "d", ctrl: true), isMac: true), "⌘ + D")
+        XCTAssertEqual(Shortcuts.formatBinding(ShortcutBinding(key: "d", ctrl: true), isMac: false), "Ctrl + D")
+        XCTAssertEqual(Shortcuts.formatBinding(ShortcutBinding(key: " "), isMac: true), "Space")
+        XCTAssertEqual(Shortcuts.formatBinding(ShortcutBinding(key: "a", shift: true, alt: true), isMac: true), "⇧ + ⌥ + A")
+    }
+
+    func testMergeWithDefaults() {
+        let merged = Shortcuts.mergeWithDefaults([.addZoom: ShortcutBinding(key: "x")])
+        XCTAssertEqual(merged[.addZoom], ShortcutBinding(key: "x"))     // overridden
+        XCTAssertEqual(merged[.splitClip], ShortcutBinding(key: "c"))   // default kept
+        XCTAssertEqual(merged.count, ShortcutAction.allCases.count)
+    }
+}
+
 final class ExtensionManifestTests: XCTestCase {
     private func manifest(id: String = "com.example.sparkles", main: String = "index.js",
                           version: String = "1.2.0",
