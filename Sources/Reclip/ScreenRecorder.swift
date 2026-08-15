@@ -34,6 +34,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     @Published var captureMicrophone = false
     @Published var captureSystemAudio = true
     @Published var captureWebcam = false
+    @Published var showCursor = true
 
     private var stream: SCStream?
     private var writer: AVAssetWriter?
@@ -101,7 +102,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         config.height = pixelHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
         config.pixelFormat = kCVPixelFormatType_32BGRA
-        config.showsCursor = true
+        config.showsCursor = showCursor
         config.queueDepth = 6
         config.capturesAudio = captureSystemAudio
         if captureMicrophone {

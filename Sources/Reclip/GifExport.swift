@@ -17,7 +17,8 @@ enum GifExport {
                        annotations: [Annotation] = [],
                        speed: Double = 1.0,
                        fps: Double = 12,
-                       maxWidth: CGFloat = 720) async throws {
+                       maxWidth: CGFloat = 720,
+                       loop: Bool = true) async throws {
         let tl = try await StyledExport.makeTimeline(source: source, style: style, zoom: zoom,
                                                      webcam: webcam, webcamSettings: webcamSettings,
                                                      annotations: annotations, trim: trim, speed: speed)
@@ -38,8 +39,9 @@ enum GifExport {
                                                          frameCount, nil) else {
             throw StyledExportError.exportSessionFailed("could not create GIF destination")
         }
+        // Loop count 0 = infinite; 1 = play once.
         let gifProps = [kCGImagePropertyGIFDictionary as String:
-                            [kCGImagePropertyGIFLoopCount as String: 0]]
+                            [kCGImagePropertyGIFLoopCount as String: loop ? 0 : 1]]
         CGImageDestinationSetProperties(dest, gifProps as CFDictionary)
         let frameProps = [kCGImagePropertyGIFDictionary as String:
                             [kCGImagePropertyGIFDelayTime as String: 1.0 / fps]]

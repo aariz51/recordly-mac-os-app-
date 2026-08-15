@@ -41,6 +41,20 @@ enum StyledExportError: LocalizedError {
 }
 
 /// Renders a styled MP4 from a source recording using a per-frame Core Image pipeline.
+enum ExportQuality: String, CaseIterable, Identifiable {
+    case high = "High"
+    case medium = "Medium"
+    case low = "Low"
+    var id: String { rawValue }
+    var preset: String {
+        switch self {
+        case .high: return AVAssetExportPresetHighestQuality
+        case .medium: return AVAssetExportPresetMediumQuality
+        case .low: return AVAssetExportPresetLowQuality
+        }
+    }
+}
+
 enum StyledExport {
 
     /// A playable timeline (trim + speed applied) plus its styled video composition.
@@ -142,11 +156,12 @@ enum StyledExport {
                        webcam: WebcamFrames = WebcamFrames(),
                        webcamSettings: WebcamSettings = WebcamSettings(),
                        annotations: [Annotation] = [],
-                       speed: Double = 1.0) async throws {
+                       speed: Double = 1.0,
+                       quality: ExportQuality = .high) async throws {
         let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
                                         webcam: webcam, webcamSettings: webcamSettings,
                                         annotations: annotations, trim: trim, speed: speed)
-        guard let export = AVAssetExportSession(asset: tl.asset, presetName: AVAssetExportPresetHighestQuality) else {
+        guard let export = AVAssetExportSession(asset: tl.asset, presetName: quality.preset) else {
             throw StyledExportError.exportSessionFailed("could not create export session")
         }
         export.videoComposition = tl.video

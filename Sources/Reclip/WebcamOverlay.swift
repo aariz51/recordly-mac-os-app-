@@ -14,6 +14,10 @@ struct WebcamSettings: Equatable {
     var enabled = false
     var corner: Corner = .bottomTrailing
     var sizeFraction: Double = 0.22   // fraction of the canvas short side
+    var marginFraction: Double = 0.04 // gap from the frame edge, fraction of short side
+    var roundness: Double = 1.0       // 1 = circle, 0 = square corners
+    var mirror: Bool = true           // selfie-style horizontal flip
+    var shadow: Bool = true           // soft drop shadow behind the bubble
 }
 
 /// Pre-decoded webcam frames (detached from their pixel buffers) keyed by time.
@@ -76,11 +80,17 @@ enum WebcamOverlay {
         let crop = CGRect(x: ext.midX - side / 2, y: ext.midY - side / 2, width: side, height: side)
         var square = cam.cropped(to: crop)
             .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+        // Selfie-style horizontal mirror.
+        if settings.mirror {
+            square = square.transformed(by: CGAffineTransform(scaleX: -1, y: 1))
+                .transformed(by: CGAffineTransform(translationX: side, y: 0))
+        }
         square = square.transformed(by: CGAffineTransform(scaleX: diameter / side, y: diameter / side))
 
-        let bubble = circleMask(square, diameter: diameter)
+        let cornerRadius = (diameter / 2) * CGFloat(max(0, min(settings.roundness, 1)))
+        let bubble = roundedMask(square, diameter: diameter, radius: cornerRadius)
 
-        let margin = shortSide * 0.04
+        let margin = shortSide * CGFloat(settings.marginFraction)
         let x: CGFloat
         let y: CGFloat
         switch settings.corner {
@@ -90,20 +100,40 @@ enum WebcamOverlay {
         case .topLeading:     x = margin;                           y = canvas.height - diameter - margin
         }
         let positioned = bubble.transformed(by: CGAffineTransform(translationX: x, y: y))
-        return positioned.composited(over: base)
+
+        var result = base
+        if settings.shadow, let shadow = makeShadow(positioned) {
+            result = shadow.composited(over: result)
+        }
+        return positioned.composited(over: result)
     }
 
-    private static func circleMask(_ image: CIImage, diameter: CGFloat) -> CIImage {
+    private static func roundedMask(_ image: CIImage, diameter: CGFloat, radius: CGFloat) -> CIImage {
         let extent = image.extent
         let gen = CIFilter.roundedRectangleGenerator()
         gen.color = .white
         gen.extent = extent
-        gen.radius = Float(diameter / 2)
+        gen.radius = Float(radius)
         guard let mask = gen.outputImage else { return image }
         let blend = CIFilter.blendWithMask()
         blend.inputImage = image
         blend.backgroundImage = CIImage.empty()
         blend.maskImage = mask.cropped(to: extent)
         return blend.outputImage?.cropped(to: extent) ?? image
+    }
+
+    /// Soft drop shadow from the bubble's alpha, offset slightly down.
+    private static func makeShadow(_ image: CIImage) -> CIImage? {
+        let matrix = CIFilter.colorMatrix()
+        matrix.inputImage = image
+        matrix.rVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        matrix.gVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        matrix.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)
+        matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 0.45)
+        guard let sil = matrix.outputImage else { return nil }
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = sil
+        blur.radius = Float(min(image.extent.width, image.extent.height) * 0.06)
+        return blur.outputImage?.transformed(by: CGAffineTransform(translationX: 0, y: -image.extent.height * 0.03))
     }
 }
