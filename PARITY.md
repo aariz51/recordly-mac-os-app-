@@ -40,7 +40,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | **System cursor asset extraction** | ❌ | — |
 | Cursor show/hide | ✅ | showCursor (batch 1) |
 | **Crash recovery / validation / pruning** | ❌ | — |
-| Permission pre-flight + prompts | 🟡 | permission hint only |
+| Permission pre-flight + prompts | ✅ | `PermissionStatus` reads screen/camera/mic TCC without prompting + screen-recording request; manually verified per-permission on-device |
 
 ## 2. Timeline / editor
 | Feature | Reclip | Note |
