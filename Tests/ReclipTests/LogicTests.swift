@@ -198,6 +198,29 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class ExportDimensionsTests: XCTestCase {
+    func testAspectFitsWithinSourceBox() {
+        // Square export of a 1080p clip fits the short side (1080²), never upscales to 1920².
+        let sq = ExportDimensions.canvas(sourceWidth: 1920, sourceHeight: 1080, ratio: 1.0)
+        XCTAssertEqual(sq.width, 1080); XCTAssertEqual(sq.height, 1080)
+        // 9:16 vertical → 1080×1920.
+        let v = ExportDimensions.canvas(sourceWidth: 1920, sourceHeight: 1080, ratio: 9.0 / 16.0)
+        XCTAssertEqual(v.width, 1080); XCTAssertEqual(v.height, 1920)
+        // 16:9 from a square source → 1080×606 (even-floored).
+        let w = ExportDimensions.canvas(sourceWidth: 1080, sourceHeight: 1080, ratio: 16.0 / 9.0)
+        XCTAssertEqual(w.width, 1080); XCTAssertEqual(w.height, 606)
+        // Native passthrough floors odd dimensions to even.
+        let n = ExportDimensions.canvas(sourceWidth: 1921, sourceHeight: 1081, ratio: nil)
+        XCTAssertEqual(n.width, 1920); XCTAssertEqual(n.height, 1080)
+    }
+
+    func testEvenFloorFloorAndMinimum() {
+        XCTAssertEqual(ExportDimensions.evenFloor(607.5), 606)
+        XCTAssertEqual(ExportDimensions.evenFloor(1), 2)     // never below 2
+        XCTAssertEqual(ExportDimensions.evenFloor(0), 2)
+    }
+}
+
 final class MotionBlurTests: XCTestCase {
     func testConfigOffBelowMinimum() {
         XCTAssertNil(MotionBlur.config(amount: 0))

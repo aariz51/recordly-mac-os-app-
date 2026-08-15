@@ -109,6 +109,34 @@ enum ExportBitrate {
     }
 }
 
+/// Output canvas sizing — a port of Recordly's `calculateMp4SourceDimensions`. An aspect
+/// preset fits *within* the source's bounding box (so a square export of a 1920×1080 clip
+/// is 1080×1080, not an upscaled 1920×1920), with all dimensions floored to even values.
+enum ExportDimensions {
+    static func evenFloor(_ v: Double) -> Int { max(2, Int((v / 2).rounded(.down)) * 2) }
+
+    static func fit(maxWidth: Double, maxHeight: Double, ratio: Double) -> CGSize {
+        let mw = Double(evenFloor(maxWidth)), mh = Double(evenFloor(maxHeight))
+        let r = (ratio.isFinite && ratio > 0) ? ratio : 16.0 / 9.0
+        if mw / mh > r {
+            let h = mh, w = Double(evenFloor(h * r))
+            return CGSize(width: min(w, mw), height: h)
+        }
+        let w = mw, h = Double(evenFloor(w / r))
+        return CGSize(width: w, height: min(h, mh))
+    }
+
+    /// `ratio == nil` → native/source passthrough (even-floored).
+    static func canvas(sourceWidth: Double, sourceHeight: Double, ratio: Double?) -> CGSize {
+        let sw = evenFloor(sourceWidth), sh = evenFloor(sourceHeight)
+        guard let r = ratio else { return CGSize(width: sw, height: sh) }
+        let longSide = Double(max(sw, sh)), shortSide = Double(min(sw, sh))
+        let maxW = r >= 1 ? longSide : shortSide
+        let maxH = r >= 1 ? shortSide : longSide
+        return fit(maxWidth: maxW, maxHeight: maxH, ratio: r)
+    }
+}
+
 enum StyledExport {
 
     /// A playable timeline (trim + speed applied) plus its styled video composition.
@@ -141,15 +169,13 @@ enum StyledExport {
         let transform = try await vTrack.load(.preferredTransform)
         let renderSize = naturalSize.applying(transform)
         let sourceSize = CGSize(width: abs(renderSize.width), height: abs(renderSize.height))
-        // The output canvas may differ from the source (aspect-ratio presets);
-        // the footage is then fit inside it and the background fills the rest.
-        let canvas: CGSize = {
-            guard let ratio = style.aspect.ratio else { return sourceSize }
-            let base = max(sourceSize.width, sourceSize.height)
-            let raw = ratio >= 1 ? CGSize(width: base, height: base / ratio)
-                                 : CGSize(width: base * ratio, height: base)
-            return CGSize(width: (raw.width / 2).rounded() * 2, height: (raw.height / 2).rounded() * 2)
-        }()
+        // The output canvas may differ from the source (aspect-ratio presets); the
+        // footage is then fit inside it and the background fills the rest. Sizing fits
+        // within the source box (Recordly's calculateMp4SourceDimensions) so presets
+        // don't upscale the source.
+        let canvas = ExportDimensions.canvas(sourceWidth: sourceSize.width,
+                                             sourceHeight: sourceSize.height,
+                                             ratio: style.aspect.ratio.map(Double.init))
         let fullDuration = try await srcAsset.load(.duration)
         let srcRange = trim ?? CMTimeRange(start: .zero, duration: fullDuration)
 
