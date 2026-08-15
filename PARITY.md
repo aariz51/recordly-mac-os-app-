@@ -1,112 +1,144 @@
-# Recordly → Reclip feature parity audit
+# Recordly → Reclip feature-parity audit
 
-Line-by-line verification that every Recordly feature exists in Reclip (our original
-native macOS app). ✅ = have · 🟡 = partial · ❌ = missing. Engine work is tracked here;
-UI wiring is owned by the UI/UX developer.
+Authoritative line-by-line review of the Recordly codebase (`~/recordly`, Electron/TS)
+against Reclip (our native Swift app). Based on a full source inventory, not the README.
+✅ have · 🟡 partial · ❌ missing. Engine work tracked here; UI wiring owned by the UI dev.
 
-_Legend for "where": the Reclip engine file that implements (or would implement) it._
-
-## Recording
-| Recordly feature | Reclip | Where / note |
-|---|---|---|
-| Record a full display | ✅ | ScreenRecorder (CaptureSource.display) |
-| Record a single window | ✅ | ScreenRecorder (CaptureSource.window) |
-| Jump from recording into the editor | ✅ | ContentView → EditorView after stop |
-| Capture microphone audio | ✅ | ScreenRecorder.captureMicrophone |
-| Capture system audio | ✅ | ScreenRecorder.captureSystemAudio |
-| Native capture backend | ✅ | ScreenCaptureKit |
-| Open existing recording to edit | ✅ | ContentView "Open a recording…" |
-| Save/reopen `.recordly` project files | ❌ | needs a project file format + editor-state persistence |
-
-## Timeline & editing
-| Recordly feature | Reclip | Where / note |
-|---|---|---|
-| Trim unwanted sections | ✅ | StyledExport trim (in preview + export) |
-| Automatic zoom (cursor activity) | ✅ | ZoomTimeline.autoZoom |
-| Manual zoom regions | 🟡 | ZoomRegion model supports it; no add/edit API yet |
-| Speed up / slow down | 🟡 | global speed only; per-segment speed regions missing |
-| Text annotations | ✅ | Annotations (captions) |
-| Image / figure annotations | ❌ | only text captions today |
-| Extra audio regions on timeline | ❌ | not implemented |
-| Crop the recorded frame | ❌ | compositor crop rect missing |
-| Drag-and-drop timeline UI | ❌ | UI-layer; owned by UI dev |
-| Save/reopen project with editor state | ❌ | see project files above |
-
-## Cursor controls
-| Recordly feature | Reclip | Where / note |
-|---|---|---|
-| Show / hide cursor | ✅ | ScreenRecorder.showCursor (batch 1) |
-| Cursor size adjustment | ❌ | needs rendered-cursor overlay |
-| Cursor smoothing | ❌ | have cursor track; no smoothed overlay render |
-| Cursor motion blur | ❌ | needs rendered-cursor overlay |
-| Cursor click bounce | ❌ | needs click capture + overlay |
-| Cursor sway | ❌ | needs rendered-cursor overlay |
-| Cursor loop mode | ❌ | needs rendered-cursor overlay |
-| macOS-style cursor assets | ❌ | needs rendered-cursor overlay |
-
-_Note: Reclip captures the real cursor. A full cursor-polish system (hide the OS cursor,
-render a smoothed sprite along the tracked path) is the single biggest remaining feature._
-
-## Webcam overlay
-| Recordly feature | Reclip | Where / note |
-|---|---|---|
-| Enable / disable webcam | ✅ | WebcamSettings.enabled |
-| Size control | ✅ | WebcamSettings.sizeFraction |
-| Preset positions | ✅ | 4 corners |
-| Custom X/Y placement | ❌ | only corner presets |
-| Margin control | ✅ | WebcamSettings.marginFraction (batch 1) |
-| Roundness control | ✅ | WebcamSettings.roundness (batch 1) |
-| Mirror | ✅ | WebcamSettings.mirror (batch 1) |
-| Shadow | ✅ | WebcamSettings.shadow (batch 1) |
-| Upload / replace / remove footage | ❌ | Reclip records live webcam only |
-| Zoom-reactive scaling | ❌ | not implemented |
-
-## Frame styling & backgrounds
-| Recordly feature | Reclip | Where / note |
-|---|---|---|
-| Solid color backgrounds | ✅ | StyleOptions.Background.solid |
-| Gradient backgrounds | ✅ | StyleOptions.Background.gradient |
-| Frame padding | ✅ | StyleOptions.paddingFraction |
-| Rounded corners | ✅ | StyleOptions.cornerRadiusFraction |
-| Drop shadows | ✅ | StyleOptions.shadow* |
-| Built-in wallpapers | ❌ | no image backgrounds |
-| Custom uploaded backgrounds | ❌ | no image backgrounds |
-| Background blur | ❌ | blurred-source background missing |
-| Aspect ratio presets | ❌ | fixed to source aspect |
-
-## Export
-| Recordly feature | Reclip | Where / note |
-|---|---|---|
-| MP4 export | ✅ | StyledExport.export |
-| GIF export | ✅ | GifExport.export |
-| Export quality selection | ✅ | ExportQuality (batch 1) |
-| GIF frame-rate selection | 🟡 | fps param exists; UI exposure by UI dev |
-| GIF loop toggle | ✅ | GifExport loop (batch 1) |
-| GIF size presets | 🟡 | maxWidth param exists; presets not enumerated |
-| Aspect / output dimension controls | ❌ | needs render-size control |
-| Reveal exported files in Finder | ✅ | NSWorkspace reveal |
-
-## Workflow & usability
-| Recordly feature | Reclip | Where / note |
-|---|---|---|
-| Customizable keyboard shortcuts | ❌ | not implemented |
-| In-app shortcut reference | ❌ | not implemented |
-| Feedback / issue links | 🟡 | can add repo issue link |
-| Project persistence | ❌ | see project files |
+> **Scope reality:** the deep audit shows Recordly is a large, mature product — it has
+> whole subsystems Reclip doesn't (auto-captions/Whisper, a plugin+marketplace system, a
+> full timeline editor, a cursor-polish engine, project files, i18n). Reclip currently
+> implements roughly the **core record→polish→export loop (~20%)**. Full parity is a
+> multi-developer, multi-week effort; this file is the roadmap and running status.
 
 ---
 
-### Remaining engine work (prioritized)
-1. Background blur (blurred-source background) — compositor
-2. Aspect ratio presets + output dimensions — compositor render size
-3. Crop the recorded frame — compositor crop rect
-4. Manual zoom regions (add/edit API) — model exists, expose mutation
-5. Webcam custom X/Y + zoom-reactive scaling — compositor
-6. `.reclip` project file (save/reopen editor state) — codable of all settings
-7. Per-segment speed regions — time-map extension
-8. Image annotations — annotation type extension
-9. **Cursor polish system** (hide OS cursor + rendered smoothed sprite, size, motion blur,
-   click bounce, sway, loop) — the largest remaining feature
-10. Extra audio regions — timeline audio mixing
+## 1. Recording / capture
+| Feature | Reclip | Note |
+|---|---|---|
+| Full display capture | ✅ | ScreenRecorder |
+| Multi-monitor selection | ✅ | availableDisplays |
+| Single-window capture | ✅ | CaptureSource.window |
+| Own-window exclusion | 🟡 | not filtered |
+| Source thumbnails + app icons | ❌ | picker is text-only |
+| Native backend (mac SCK) | ✅ | ScreenCaptureKit |
+| Target 60fps / retina | ✅ | config |
+| **Pause / Resume recording** | ❌ | start/stop only |
+| **Cancel (discard) recording** | ❌ | — |
+| Live REC timer | ✅ | elapsed |
+| **Countdown timer (3/5/10s)** | ❌ | — |
+| Microphone capture | ✅ | captureMicrophone |
+| **Mic device selection + level meter** | ❌ | default device only |
+| **Mic processing profiles** | ❌ | raw only |
+| System audio | ✅ | captureSystemAudio |
+| Webcam capture | ✅ | sidecar |
+| **Webcam device selection + live preview** | ❌ | default device only |
+| **Floating HUD control bar** | ❌ | — |
+| Cursor position telemetry | ✅ | CursorSampler |
+| **Cursor click/interaction capture** | ❌ | position only |
+| **System cursor asset extraction** | ❌ | — |
+| Cursor show/hide | ✅ | showCursor (batch 1) |
+| **Crash recovery / validation / pruning** | ❌ | — |
+| Permission pre-flight + prompts | 🟡 | permission hint only |
 
-_This file is refreshed as the deep code inventory of Recordly completes._
+## 2. Timeline / editor
+| Feature | Reclip | Note |
+|---|---|---|
+| Trim | ✅ | StyledExport trim |
+| **Split clip** | ❌ | — |
+| **Clip model (per-clip speed grid, mute, volume, normalize)** | ❌ | single clip only |
+| **Undo / redo** | ❌ | — |
+| **Drag/resize regions on a timeline** | ❌ | UI (UI dev) |
+| Auto zoom (cursor) | ✅ | ZoomTimeline.autoZoom |
+| **Manual zoom regions (add/edit)** | 🟡 | model supports; no add API |
+| **Zoom depth presets (6) / manual focus / easing / connect / motion-blur tuning** | ❌ | single scale + ramp only |
+| **Speed regions (per-segment)** | 🟡 | global speed only |
+| **Playback controls (play/pause/skip/volume)** | 🟡 | preview loops; no scrub UI |
+
+## 3. Annotations
+| Feature | Reclip | Note |
+|---|---|---|
+| Text captions | ✅ | Annotations |
+| **Full text typography (font/size/style/align/color/bg/radius)** | ❌ | fixed style |
+| **Image annotations** | ❌ | — |
+| **Figure / arrow (8 directions, stroke, color)** | ❌ | — |
+| **Blur / censor region** | ❌ | — |
+| **Extra audio regions (volume/normalize)** | ❌ | — |
+
+## 4. Cursor polish engine  ❌ (entire subsystem missing)
+Recordly renders a stylized cursor from telemetry: 5 cursor styles, size (0.5–10×),
+motion blur, smoothing, sway, click bounce + duration, 4 click effects (spotlight/ripple/
+echo + color/size/opacity/duration), motion presets, spring tuning. **Reclip has none** —
+it captures the real cursor. This is the single largest missing feature.
+
+## 5. Webcam overlay
+| Feature | Reclip | Note |
+|---|---|---|
+| Enable / size / corner presets | ✅ | WebcamSettings |
+| Mirror | ✅ | batch 1 |
+| Roundness | ✅ | batch 1 |
+| Shadow | ✅ | batch 1 |
+| Margin | ✅ | batch 1 |
+| **React-to-zoom scaling** | ❌ | — |
+| **Independent width + height** | 🟡 | square only |
+| **9-cell position + custom X/Y** | 🟡 | 4 corners |
+| **Crop control** | ❌ | — |
+| **Upload / replace / remove footage** | ❌ | live only |
+| **Time-offset alignment** | ❌ | — |
+
+## 6. Backgrounds / frame
+| Feature | Reclip | Note |
+|---|---|---|
+| Solid (15 swatches) | 🟡 | 2 solids |
+| Gradient (24 presets) | 🟡 | 3 gradients |
+| Padding | ✅ | linked only (no per-side) |
+| Rounded corners | ✅ | (no squircle) |
+| Drop shadow | ✅ | 1-layer |
+| **Background blur (blurred source)** | ✅ | batch 2 (this commit) |
+| **24 image wallpapers + video wallpaper + upload** | ❌ | — |
+| **Device frames** | ❌ | — |
+| **Aspect ratio presets (8 + custom)** | 🟡 | 5 presets (batch 2) |
+| **Advanced per-side / vertical padding** | ❌ | — |
+
+## 7. Auto-captions  ❌ (entire subsystem missing)
+Recordly: local Whisper transcription, model download/management, 10 languages, full
+caption styling, inline editing, karaoke renderer, SRT/VTT export. **Reclip has none.**
+
+## 8. Export
+| Feature | Reclip | Note |
+|---|---|---|
+| MP4 (H.264/AAC) | ✅ | StyledExport |
+| GIF | ✅ | GifExport |
+| MP4 quality (4 levels) | 🟡 | 3 levels (batch 1) |
+| **MP4 encoding mode / frame rate (24/30/60) / HW accel** | ❌ | fixed |
+| GIF loop toggle | ✅ | batch 1 |
+| GIF frame-rate (4) + size presets (3) | 🟡 | params exist; presets not enumerated |
+| Output dimension control | 🟡 | via aspect (batch 2) |
+| Reveal in Finder | ✅ | — |
+| Save dialog / Save-again / discard | 🟡 | fixed output path |
+| Export progress phases | ❌ | busy flag only |
+
+## 9. Platform / workflow  (mostly ❌)
+Project files (`.recordia`), project browser, autosave, dirty-state/recovery, ~50 persisted
+prefs + named presets, rebindable keyboard shortcuts + reference, auto-update, theme,
+**9-locale i18n**, custom fonts, and the **entire extension/plugin + marketplace system** —
+**none present in Reclip.**
+
+---
+
+## Engine work completed so far (this session, original Swift)
+- Batch 1: cursor show/hide, webcam mirror/roundness/shadow/margin, GIF loop, MP4 quality.
+- Batch 2: background blur (blurred-source), aspect-ratio presets + output canvas.
+
+## Prioritized engine roadmap (feasible, high-value first)
+1. Manual zoom regions add/edit API (model exists) + zoom depth presets & easing
+2. More backgrounds (wallpaper images, more solids/gradients) + per-side padding + squircle
+3. Crop (compositor crop rect + reset)
+4. `.reclip` project file — Codable of every setting; save/open/recents
+5. Webcam: independent W/H, 9-cell + custom XY, react-to-zoom
+6. Export: frame-rate (24/30/60), GIF fps/size presets in UI, output-dimension picker, save dialog, progress phases
+7. Recording: countdown, pause/resume/cancel, mic/webcam device pickers + meters
+8. Rich annotations (typography, image, arrow, blur/censor)
+9. **Cursor polish engine** (hide OS cursor + rendered smoothed sprite, size, motion blur, click bounce, click effects) — largest
+10. **Auto-captions** (Whisper) and **extensions/marketplace** — each a subsystem; likely out of near-term scope
+
+_Refreshed from the full Recordly source inventory._

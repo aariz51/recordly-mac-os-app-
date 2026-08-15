@@ -22,11 +22,31 @@ struct StyleOptions: Equatable {
         }
     }
 
+    enum Aspect: String, CaseIterable, Identifiable {
+        case source = "Source"
+        case widescreen = "16:9"
+        case vertical = "9:16"
+        case square = "1:1"
+        case classic = "4:3"
+        var id: String { rawValue }
+        var ratio: CGFloat? {
+            switch self {
+            case .source: return nil
+            case .widescreen: return 16.0 / 9.0
+            case .vertical: return 9.0 / 16.0
+            case .square: return 1.0
+            case .classic: return 4.0 / 3.0
+            }
+        }
+    }
+
     var background: Background = .gradient(topRGB: (0.39, 0.36, 1.0), bottomRGB: (0.66, 0.33, 0.97))
     var paddingFraction: Double = 0.06     // fraction of the shorter side
     var cornerRadiusFraction: Double = 0.03
     var shadowOpacity: Double = 0.35
     var shadowRadius: Double = 24
+    var backgroundBlur: Double = 0         // 0 = off; blurs the source behind as the backdrop
+    var aspect: Aspect = .source
 }
 
 enum StyledExportError: LocalizedError {
@@ -82,7 +102,16 @@ enum StyledExport {
         let naturalSize = try await vTrack.load(.naturalSize)
         let transform = try await vTrack.load(.preferredTransform)
         let renderSize = naturalSize.applying(transform)
-        let size = CGSize(width: abs(renderSize.width), height: abs(renderSize.height))
+        let sourceSize = CGSize(width: abs(renderSize.width), height: abs(renderSize.height))
+        // The output canvas may differ from the source (aspect-ratio presets);
+        // the footage is then fit inside it and the background fills the rest.
+        let canvas: CGSize = {
+            guard let ratio = style.aspect.ratio else { return sourceSize }
+            let base = max(sourceSize.width, sourceSize.height)
+            let raw = ratio >= 1 ? CGSize(width: base, height: base / ratio)
+                                 : CGSize(width: base * ratio, height: base)
+            return CGSize(width: (raw.width / 2).rounded() * 2, height: (raw.height / 2).rounded() * 2)
+        }()
         let fullDuration = try await srcAsset.load(.duration)
         let srcRange = trim ?? CMTimeRange(start: .zero, duration: fullDuration)
 
@@ -106,34 +135,59 @@ enum StyledExport {
             comp.scaleTimeRange(CMTimeRange(start: .zero, duration: srcRange.duration), toDuration: scaled)
         }
 
-        let shortSide = min(size.width, size.height)
+        let shortSide = min(canvas.width, canvas.height)
         let padding = shortSide * style.paddingFraction
         let corner = shortSide * style.cornerRadiusFraction
         let ciContext = CIContext()
-        let background = makeBackground(style.background, size: size)
-        let renderedAnnotations = Annotations.prerender(annotations, canvas: size)
+        let staticBackground = makeBackground(style.background, size: canvas)
+        let renderedAnnotations = Annotations.prerender(annotations, canvas: canvas)
         let trimStart = srcRange.start.seconds
+        let blur = style.backgroundBlur
 
         let video = AVMutableVideoComposition(asset: comp) { request in
             let srcT = trimStart + request.compositionTime.seconds * clampedSpeed
+            // Background is either the static solid/gradient, or a blurred fill of the frame.
+            let background = blur > 0.01
+                ? blurredFill(request.sourceImage, canvas: canvas, intensity: CGFloat(blur))
+                : staticBackground
             let z = zoom.value(at: srcT)
-            let zoomed = applyZoom(request.sourceImage, scale: z.scale, focus: z.focus, canvas: size)
+            let zoomed = applyZoom(request.sourceImage, scale: z.scale, focus: z.focus, canvas: canvas)
             let composed = compose(source: zoomed,
                                    background: background,
-                                   canvas: size,
+                                   canvas: canvas,
                                    padding: padding,
                                    corner: corner,
                                    shadowOpacity: style.shadowOpacity,
                                    shadowRadius: style.shadowRadius,
                                    context: ciContext)
-            let withCam = WebcamOverlay.composite(base: composed, canvas: size,
+            let withCam = WebcamOverlay.composite(base: composed, canvas: canvas,
                                                   webcam: webcam, time: srcT, settings: webcamSettings)
-            let withText = Annotations.composite(base: withCam, canvas: size,
+            let withText = Annotations.composite(base: withCam, canvas: canvas,
                                                  rendered: renderedAnnotations, time: srcT)
             request.finish(with: withText, context: nil)
         }
-        video.renderSize = size
+        video.renderSize = canvas
         return StyledTimeline(asset: comp, video: video, duration: comp.duration.seconds)
+    }
+
+    /// Aspect-fills the frame across the whole canvas, blurred and darkened, as a backdrop.
+    private static func blurredFill(_ image: CIImage, canvas: CGSize, intensity: CGFloat) -> CIImage {
+        let rect = CGRect(origin: .zero, size: canvas)
+        let ext = image.extent
+        guard ext.width > 0, ext.height > 0 else { return CIImage(color: .black).cropped(to: rect) }
+        let scale = max(canvas.width / ext.width, canvas.height / ext.height)
+        var img = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let e = img.extent
+        img = img.transformed(by: CGAffineTransform(translationX: (canvas.width - e.width) / 2 - e.minX,
+                                                    y: (canvas.height - e.height) / 2 - e.minY))
+        let blur = CIFilter.gaussianBlur()
+        blur.inputImage = img.clampedToExtent()
+        blur.radius = Float(intensity * min(canvas.width, canvas.height) * 0.03)
+        let blurred = (blur.outputImage ?? img).cropped(to: rect)
+        let darken = CIFilter.colorControls()
+        darken.inputImage = blurred
+        darken.brightness = -0.15
+        return (darken.outputImage ?? blurred).cropped(to: rect)
     }
 
     /// Scales the frame around a normalized (top-left origin) focus point, keeping the original extent.
@@ -157,7 +211,8 @@ enum StyledExport {
                        webcamSettings: WebcamSettings = WebcamSettings(),
                        annotations: [Annotation] = [],
                        speed: Double = 1.0,
-                       quality: ExportQuality = .high) async throws {
+                       quality: ExportQuality = .high,
+                       progress: (@Sendable (Double) -> Void)? = nil) async throws {
         let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
                                         webcam: webcam, webcamSettings: webcamSettings,
                                         annotations: annotations, trim: trim, speed: speed)
@@ -169,7 +224,18 @@ enum StyledExport {
         export.outputFileType = .mp4
         try? FileManager.default.removeItem(at: output)
 
-        try await export.export(to: output, as: .mp4)
+        guard let progress else {
+            try await export.export(to: output, as: .mp4)
+            return
+        }
+
+        // Report a real fraction while the render runs, so the UI can say how
+        // much is left rather than only that something is happening.
+        async let running: Void = export.export(to: output, as: .mp4)
+        for await state in export.states(updateInterval: 0.25) {
+            if case .exporting(let p) = state { progress(p.fractionCompleted) }
+        }
+        try await running
     }
 
     // MARK: - Compositing
