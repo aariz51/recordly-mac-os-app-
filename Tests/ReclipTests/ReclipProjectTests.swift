@@ -79,6 +79,32 @@ final class ReclipProjectTests: XCTestCase {
         XCTAssertTrue(loaded.captionsEnabled)
     }
 
+    func testDirtyStateTracking() {
+        var style = StyleOptions(); style.paddingFraction = 0.05
+        let base = ReclipProject.capture(
+            source: URL(fileURLWithPath: "/tmp/d.mp4"),
+            style: style, zoom: ZoomTimeline(), webcam: WebcamSettings(),
+            annotations: [], trimStart: 0, trimEnd: 0, speed: 1.0)
+
+        var doc = DocumentState()
+        XCTAssertFalse(doc.hasEverBeenSaved)
+        XCTAssertTrue(doc.isDirty(base), "never-saved project is dirty")
+
+        doc.markSaved(base)
+        XCTAssertTrue(doc.hasEverBeenSaved)
+        XCTAssertFalse(doc.isDirty(base), "identical to saved baseline → clean")
+
+        var edited = style; edited.paddingFraction = 0.2
+        let changed = ReclipProject.capture(
+            source: URL(fileURLWithPath: "/tmp/d.mp4"),
+            style: edited, zoom: ZoomTimeline(), webcam: WebcamSettings(),
+            annotations: [], trimStart: 0, trimEnd: 0, speed: 1.0)
+        XCTAssertTrue(doc.isDirty(changed), "an edit flips dirty")
+
+        doc.markSaved(changed)
+        XCTAssertFalse(doc.isDirty(changed), "re-saving clears dirty")
+    }
+
     func testGradientAndSourceAspectRoundTrip() throws {
         var style = StyleOptions()
         style.background = .gradient(topRGB: (0.1, 0.2, 0.3), bottomRGB: (0.4, 0.5, 0.6))

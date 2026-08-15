@@ -186,4 +186,27 @@ struct ReclipProject: Codable, Equatable {
     static func load(from url: URL) throws -> ReclipProject {
         try JSONDecoder().decode(ReclipProject.self, from: Data(contentsOf: url))
     }
+
+    /// Whether this project differs from a previously-saved baseline (Recordly's
+    /// `hasUnsavedProjectChanges`). ReclipProject is Equatable over all persisted state,
+    /// so this is an exact structural comparison; a nil baseline means "never saved".
+    func hasUnsavedChanges(since saved: ReclipProject?) -> Bool {
+        guard let saved else { return true }
+        return self != saved
+    }
+}
+
+/// Tracks the last-saved baseline so the editor can show an "unsaved changes" indicator
+/// and prompt before discarding — a port of Recordly's project dirty-state tracking.
+struct DocumentState: Equatable {
+    private(set) var savedBaseline: ReclipProject?
+
+    var hasEverBeenSaved: Bool { savedBaseline != nil }
+
+    func isDirty(_ current: ReclipProject) -> Bool {
+        current.hasUnsavedChanges(since: savedBaseline)
+    }
+
+    /// Records the just-persisted project as the clean baseline.
+    mutating func markSaved(_ project: ReclipProject) { savedBaseline = project }
 }
