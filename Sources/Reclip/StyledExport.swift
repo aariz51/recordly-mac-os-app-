@@ -47,6 +47,17 @@ struct StyleOptions: Equatable {
     var shadowRadius: Double = 24
     var backgroundBlur: Double = 0         // 0 = off; blurs the source behind as the backdrop
     var aspect: Aspect = .source
+
+    /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
+    struct CropInsets: Equatable {
+        var top: Double = 0
+        var bottom: Double = 0
+        var left: Double = 0
+        var right: Double = 0
+        static let zero = CropInsets()
+        var hasCrop: Bool { top + bottom + left + right > 0.001 }
+    }
+    var crop: CropInsets = .zero
 }
 
 enum StyledExportError: LocalizedError {
@@ -143,15 +154,17 @@ enum StyledExport {
         let renderedAnnotations = Annotations.prerender(annotations, canvas: canvas)
         let trimStart = srcRange.start.seconds
         let blur = style.backgroundBlur
+        let crop = style.crop
 
         let video = AVMutableVideoComposition(asset: comp) { request in
             let srcT = trimStart + request.compositionTime.seconds * clampedSpeed
+            let frame = applyCrop(request.sourceImage, crop)
             // Background is either the static solid/gradient, or a blurred fill of the frame.
             let background = blur > 0.01
-                ? blurredFill(request.sourceImage, canvas: canvas, intensity: CGFloat(blur))
+                ? blurredFill(frame, canvas: canvas, intensity: CGFloat(blur))
                 : staticBackground
             let z = zoom.value(at: srcT)
-            let zoomed = applyZoom(request.sourceImage, scale: z.scale, focus: z.focus, canvas: canvas)
+            let zoomed = applyZoom(frame, scale: z.scale, focus: z.focus, canvas: canvas)
             let composed = compose(source: zoomed,
                                    background: background,
                                    canvas: canvas,
@@ -188,6 +201,23 @@ enum StyledExport {
         darken.inputImage = blurred
         darken.brightness = -0.15
         return (darken.outputImage ?? blurred).cropped(to: rect)
+    }
+
+    /// Trims the recorded frame by the given edge fractions and re-origins it at zero.
+    private static func applyCrop(_ image: CIImage, _ crop: StyleOptions.CropInsets) -> CIImage {
+        guard crop.hasCrop else { return image }
+        let e = image.extent
+        let left = CGFloat(min(max(crop.left, 0), 0.49))
+        let right = CGFloat(min(max(crop.right, 0), 0.49))
+        let top = CGFloat(min(max(crop.top, 0), 0.49))
+        let bottom = CGFloat(min(max(crop.bottom, 0), 0.49))
+        // CI is bottom-origin: raise the origin by the bottom inset, shrink height by top+bottom.
+        let rect = CGRect(x: e.minX + left * e.width,
+                          y: e.minY + bottom * e.height,
+                          width: max(e.width * (1 - left - right), 1),
+                          height: max(e.height * (1 - top - bottom), 1))
+        return image.cropped(to: rect)
+            .transformed(by: CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
     }
 
     /// Scales the frame around a normalized (top-left origin) focus point, keeping the original extent.
