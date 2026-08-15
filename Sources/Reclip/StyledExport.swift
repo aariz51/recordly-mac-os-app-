@@ -93,7 +93,8 @@ enum StyledExport {
     static func export(source: URL,
                        to output: URL,
                        style: StyleOptions,
-                       zoom: ZoomTimeline = ZoomTimeline()) async throws {
+                       zoom: ZoomTimeline = ZoomTimeline(),
+                       trim: CMTimeRange? = nil) async throws {
         let asset = AVURLAsset(url: source)
         let composition = try await makeComposition(for: asset, style: style, zoom: zoom)
 
@@ -103,6 +104,7 @@ enum StyledExport {
         export.videoComposition = composition
         export.outputURL = output
         export.outputFileType = .mp4
+        if let trim { export.timeRange = trim }
         try? FileManager.default.removeItem(at: output)
 
         try await export.export(to: output, as: .mp4)

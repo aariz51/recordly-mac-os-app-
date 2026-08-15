@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import AVFoundation
 
 struct EditorView: View {
     let sourceURL: URL
@@ -10,6 +11,8 @@ struct EditorView: View {
     @State private var autoZoom = false
     @State private var cursorTrack: CursorTrack?
     @State private var duration: Double = 0
+    @State private var trimStart: Double = 0
+    @State private var trimEnd: Double = 0
     @State private var player = AVPlayer()
     @State private var playerItem: AVPlayerItem?
     @State private var isExporting = false
@@ -67,6 +70,14 @@ struct EditorView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
+            if duration > 0 {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Trim  \(timeLabel(trimStart)) – \(timeLabel(trimEnd))").font(.headline)
+                    Slider(value: $trimStart, in: 0...max(trimEnd - 0.2, 0.2))
+                    Slider(value: $trimEnd, in: min(trimStart + 0.2, duration)...duration)
+                }
+            }
+
             Divider()
 
             Button {
@@ -78,6 +89,14 @@ struct EditorView: View {
             .controlSize(.large)
             .buttonStyle(.borderedProminent)
             .tint(.pink)
+            .disabled(isExporting)
+
+            Button {
+                Task { await export(asGif: true) }
+            } label: {
+                Label("Export GIF", systemImage: "photo.stack")
+                    .frame(maxWidth: .infinity)
+            }
             .disabled(isExporting)
 
             if !status.isEmpty {
@@ -118,7 +137,10 @@ struct EditorView: View {
         let asset = AVURLAsset(url: sourceURL)
         do {
             if cursorTrack == nil { cursorTrack = CursorTrack.load(besides: sourceURL) }
-            if duration == 0 { duration = (try? await asset.load(.duration))?.seconds ?? 0 }
+            if duration == 0 {
+                duration = (try? await asset.load(.duration))?.seconds ?? 0
+                if trimEnd == 0 { trimEnd = duration }
+            }
             updateZoom()
             let composition = try await StyledExport.makeComposition(for: asset, style: style, zoom: zoom)
             let item = AVPlayerItem(asset: asset)
@@ -133,12 +155,27 @@ struct EditorView: View {
         }
     }
 
-    private func export() async {
+    private func timeLabel(_ t: Double) -> String {
+        let s = Int(t.rounded())
+        return String(format: "%d:%02d", s / 60, s % 60)
+    }
+
+    private func export(asGif: Bool = false) async {
         isExporting = true
-        status = "Rendering…"
-        let out = sourceURL.deletingPathExtension().appendingPathExtension("styled.mp4")
+        status = asGif ? "Rendering GIF…" : "Rendering MP4…"
+        let out = sourceURL.deletingPathExtension()
+            .appendingPathExtension(asGif ? "styled.gif" : "styled.mp4")
+        var trim: CMTimeRange? = nil
+        if duration > 0, (trimStart > 0.05 || trimEnd < duration - 0.05) {
+            trim = CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
+                               duration: CMTime(seconds: trimEnd - trimStart, preferredTimescale: 600))
+        }
         do {
-            try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom)
+            if asGif {
+                try await GifExport.export(source: sourceURL, to: out, style: style, zoom: zoom, trim: trim)
+            } else {
+                try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom, trim: trim)
+            }
             exportedURL = out
             status = "Saved \(out.lastPathComponent)"
         } catch {
