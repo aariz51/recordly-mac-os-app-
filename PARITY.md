@@ -65,11 +65,12 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | **Blur / censor region** | ❌ | — |
 | **Extra audio regions (volume/normalize)** | ❌ | — |
 
-## 4. Cursor polish engine  ❌ (entire subsystem missing)
-Recordly renders a stylized cursor from telemetry: 5 cursor styles, size (0.5–10×),
-motion blur, smoothing, sway, click bounce + duration, 4 click effects (spotlight/ripple/
-echo + color/size/opacity/duration), motion presets, spring tuning. **Reclip has none** —
-it captures the real cursor. This is the single largest missing feature.
+## 4. Cursor polish engine  🟡 (v1 landed)
+Reclip now renders a stylized cursor (arrow/dot) from the tracked path with smooth
+interpolation, size control, and correct source-space compositing so crop/zoom carry it
+(CursorRenderer + CursorStyle; capture with showCursor=false). Still missing vs Recordly:
+more cursor styles, smoothing/lag tuning, motion blur, click bounce + 4 click effects,
+sway, loop mode, motion presets. **Visual look needs your review** (can't verify blind).
 
 ## 5. Webcam overlay
 | Feature | Reclip | Note |
@@ -113,7 +114,7 @@ caption styling, inline editing, karaoke renderer, SRT/VTT export. **Reclip has 
 | **MP4 frame rate (24/30/60)** | ❌ | composition.frameDuration proven ineffective; needs AVAssetWriter re-encode |
 | **MP4 encoding mode / HW accel** | ❌ | fixed |
 | GIF loop toggle | ✅ | batch 1 |
-| GIF frame-rate (4) + size presets (3) | 🟡 | params exist; presets not enumerated |
+| GIF frame-rate (4) + size presets (3) | ✅ | GifSize presets + fps param |
 | Output dimension control | 🟡 | via aspect (batch 2) |
 | Reveal in Finder | ✅ | — |
 | Save dialog / Save-again / discard | 🟡 | fixed output path |
