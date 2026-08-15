@@ -60,9 +60,9 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 |---|---|---|
 | Text captions | ✅ | Annotations |
 | **Full text typography (font/size/style/align/color/bg/radius)** | ❌ | fixed style |
-| **Image annotations** | ❌ | — |
-| **Figure / arrow (8 directions, stroke, color)** | ❌ | — |
-| **Blur / censor region** | ❌ | — |
+| Image annotations | ✅ | Annotation.kind=.image |
+| Arrow annotations (stroke, color) | ✅ | Annotation.kind=.arrow (1 dir; 8-dir TODO) |
+| Blur / censor region | ✅ | Annotation.kind=.blur/.box |
 | **Extra audio regions (volume/normalize)** | ❌ | — |
 
 ## 4. Cursor polish engine  🟡 (v1 landed)
