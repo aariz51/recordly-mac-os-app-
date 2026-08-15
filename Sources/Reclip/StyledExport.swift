@@ -320,6 +320,7 @@ enum StyledExport {
                                 speed: Double = 1.0,
                                 quality: ExportQuality = .high,
                                 frameRate: MP4FrameRate = .fps30,
+                                motionBlur: Double = 0,
                                 cursor: CursorTrack? = nil,
                                 cursorStyle: CursorStyle = CursorStyle(),
                                 captions: [CaptionCue] = [],
@@ -394,10 +395,14 @@ enum StyledExport {
         }
         writer.startSession(atSourceTime: .zero)
 
+        let mbConfig = MotionBlur.config(amount: motionBlur)
+        let frameDurationUs = 1_000_000.0 / Double(frameRate.rawValue)
         await withTaskGroup(of: Void.self) { group in
             group.addTask {
                 await pumpResampledVideo(input: vIn, adaptor: adaptor, output: vOut,
-                                         fps: frameRate.rawValue, duration: totalDuration) { t in
+                                         fps: frameRate.rawValue, duration: totalDuration,
+                                         motionBlur: mbConfig, frameDurationUs: frameDurationUs,
+                                         canvas: canvas) { t in
                     if let progress, totalDuration > 0 { progress(min(1, t / totalDuration)) }
                 }
             }
@@ -421,24 +426,63 @@ enum StyledExport {
                                            output: AVAssetReaderOutput,
                                            fps: Int,
                                            duration: Double,
+                                           motionBlur: MotionBlur.Config? = nil,
+                                           frameDurationUs: Double = 0,
+                                           canvas: CGSize = .zero,
                                            onTime: (@Sendable (Double) -> Void)?) async {
         let queue = DispatchQueue(label: "reclip.export.v")
         let interval = 1.0 / Double(fps)
+        let extent = CGRect(origin: .zero, size: canvas)
+        let ciContext = motionBlur != nil ? CIContext() : nil
+        let plan = motionBlur.map { MotionBlur.samplePlanUs(frameDurationUs: frameDurationUs, config: $0) }
+        let window = motionBlur?.sampleCount ?? 1
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             var current: CMSampleBuffer?
             var lookahead: CMSampleBuffer?
-            var boundary = 0.0        // time at which `current` stops applying
+            var recent: [CIImage] = []       // last `window` composed frames, for temporal blur
+            var boundary = 0.0               // time at which `current` stops applying
             var outIdx = 0
             var primed = false
             var done = false
             func pts(_ sb: CMSampleBuffer?) -> Double? {
                 sb.map { CMSampleBufferGetPresentationTimeStamp($0).seconds }
             }
+            func track(_ sb: CMSampleBuffer?) {
+                guard window > 1, let sb, let pb = CMSampleBufferGetImageBuffer(sb) else { return }
+                recent.append(CIImage(cvPixelBuffer: pb))
+                if recent.count > window { recent.removeFirst() }
+            }
+            // Emits `current` at `outTime`, blending the recent-frame window when motion
+            // blur is on (weights come from the sample plan, oldest → newest).
+            func emit(_ cur: CMSampleBuffer, at outTime: Double) {
+                let time = CMTime(seconds: outTime, preferredTimescale: 600)
+                if let plan, let ciContext, recent.count > 1, let pool = adaptor.pixelBufferPool {
+                    let n = min(recent.count, plan.count)
+                    let frames = Array(recent.suffix(n))
+                    let weights = Array(plan.suffix(n))
+                    let layers = zip(frames, weights).map { (image: $0, weight: $1.weight) }
+                    if let blended = MotionBlur.blend(layers, extent: extent) {
+                        var pb: CVPixelBuffer?
+                        CVPixelBufferPoolCreatePixelBuffer(nil, pool, &pb)
+                        if let pb {
+                            ciContext.render(blended, to: pb)
+                            adaptor.append(pb, withPresentationTime: time)
+                            onTime?(outTime)
+                            return
+                        }
+                    }
+                }
+                if let pb = CMSampleBufferGetImageBuffer(cur) {
+                    adaptor.append(pb, withPresentationTime: time)
+                    onTime?(outTime)
+                }
+            }
             input.requestMediaDataWhenReady(on: queue) {
                 if !primed {
                     current = output.copyNextSampleBuffer()
                     lookahead = output.copyNextSampleBuffer()
                     boundary = pts(lookahead) ?? duration
+                    track(current)
                     primed = true
                     if current == nil { input.markAsFinished(); cont.resume(); return }
                 }
@@ -447,11 +491,7 @@ enum StyledExport {
                     let outTime = Double(outIdx) * interval
                     let atTail = lookahead == nil
                     if outTime < boundary - 1e-9 || (atTail && outTime <= duration + 1e-9) {
-                        if let cur = current, let pb = CMSampleBufferGetImageBuffer(cur) {
-                            adaptor.append(pb, withPresentationTime:
-                                            CMTime(seconds: outTime, preferredTimescale: 600))
-                            onTime?(outTime)
-                        }
+                        if let cur = current { emit(cur, at: outTime) }
                         outIdx += 1
                     } else if atTail {
                         done = true
@@ -459,6 +499,7 @@ enum StyledExport {
                         current = lookahead
                         lookahead = output.copyNextSampleBuffer()
                         boundary = pts(lookahead) ?? duration
+                        track(current)
                     }
                 }
             }

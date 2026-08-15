@@ -206,6 +206,31 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testBlendAveragesFramesToGray() {
+        let extent = CGRect(x: 0, y: 0, width: 4, height: 4)
+        let black = CIImage(color: CIColor(red: 0, green: 0, blue: 0)).cropped(to: extent)
+        let white = CIImage(color: CIColor(red: 1, green: 1, blue: 1)).cropped(to: extent)
+        guard let blended = MotionBlur.blend([(black, 0.5), (white, 0.5)], extent: extent) else {
+            return XCTFail("blend returned nil")
+        }
+        let ctx = CIContext(options: [.workingColorSpace: NSNull()])
+        var px = [UInt8](repeating: 0, count: 4)
+        ctx.render(blended, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+                   format: .RGBA8, colorSpace: nil)
+        // Equal blend of black + white → mid gray (~128) on each channel.
+        XCTAssertEqual(Int(px[0]), 128, accuracy: 8, "got \(px[0])")
+        XCTAssertEqual(Int(px[1]), 128, accuracy: 8)
+        XCTAssertEqual(Int(px[2]), 128, accuracy: 8)
+    }
+
+    func testMotionBlurExportIsValid() async throws {
+        let src = tmp("mb-src.mp4"); try await makeVideo(src, size: CGSize(width: 480, height: 320), seconds: 1.5)
+        let out = tmp("mb.mp4")
+        try await StyledExport.exportReencoded(source: src, to: out, style: StyleOptions(),
+                                               frameRate: .fps30, motionBlur: 1.0)
+        try await assertValid(out)
+    }
+
     func testShadowProfilesDecreasePerLayer() {
         let p = StyledExport.videoShadowProfiles
         XCTAssertEqual(p.count, 3)                                    // Recordly's 3-layer video shadow

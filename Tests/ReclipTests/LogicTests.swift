@@ -197,3 +197,47 @@ final class WhisperTranscriberTests: XCTestCase {
         XCTAssertTrue(WhisperModel.small.localURL.path.hasSuffix("Reclip/models/ggml-small.bin"))
     }
 }
+
+final class MotionBlurTests: XCTestCase {
+    func testConfigOffBelowMinimum() {
+        XCTAssertNil(MotionBlur.config(amount: 0))
+        XCTAssertNil(MotionBlur.config(amount: nil))
+        XCTAssertNil(MotionBlur.config(amount: 0.0005))
+        XCTAssertNotNil(MotionBlur.config(amount: 0.5))
+    }
+
+    func testConfigResolvesLikeRecordly() {
+        // amount = maxAmount → normalized 1 → weightCurvePower 1.2 + 0.9 = 2.1,
+        // shutter = autoMax (0.62), sampleCount = 3 + 2*round(1*((5-3)/2)) = 5.
+        let c = MotionBlur.config(amount: 2.0)!
+        XCTAssertEqual(c.weightCurvePower, 2.1, accuracy: 1e-9)
+        XCTAssertEqual(c.shutterFraction, 0.62, accuracy: 1e-9)
+        XCTAssertEqual(c.sampleCount, 5)
+        // Sample count overrides snap to the nearest odd value in range.
+        XCTAssertEqual(MotionBlur.normalizeSampleCount(12), 13)
+        XCTAssertEqual(MotionBlur.normalizeSampleCount(11), 11)
+        XCTAssertEqual(MotionBlur.normalizeSampleCount(1000), 61)
+        XCTAssertEqual(MotionBlur.normalizeSampleCount(-5), 3)
+    }
+
+    func testSamplePlanIsSymmetricAndNormalized() {
+        let c = MotionBlur.config(amount: 1.0)!
+        let plan = MotionBlur.samplePlanUs(frameDurationUs: 33_333, config: c)
+        XCTAssertEqual(plan.count, c.sampleCount)
+        // Weights sum to 1.
+        XCTAssertEqual(plan.reduce(0) { $0 + $1.weight }, 1.0, accuracy: 1e-9)
+        // Offsets are symmetric about zero and centred (middle sample at 0).
+        XCTAssertEqual(plan.first!.offsetUs, -plan.last!.offsetUs, accuracy: 1e-6)
+        XCTAssertEqual(plan[plan.count / 2].offsetUs, 0, accuracy: 1e-6)
+        // Centre weight is the heaviest (cosine taper peaks at the middle).
+        XCTAssertGreaterThan(plan[plan.count / 2].weight, plan.first!.weight)
+        // Weight mirror symmetry.
+        XCTAssertEqual(plan.first!.weight, plan.last!.weight, accuracy: 1e-9)
+    }
+
+    func testSingleSamplePlan() {
+        let c = MotionBlur.Config(sampleCount: 1, shutterFraction: 0.5, weightCurvePower: 1.5)
+        let plan = MotionBlur.samplePlanUs(frameDurationUs: 33_333, config: c)
+        XCTAssertEqual(plan, [MotionBlur.Sample(offsetUs: 0, weight: 1)])
+    }
+}
