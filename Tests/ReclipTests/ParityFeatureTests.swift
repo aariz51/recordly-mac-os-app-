@@ -231,6 +231,78 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    /// Writes a short clip that has BOTH a video and a (silent) audio track.
+    private func makeVideoWithAudio(_ url: URL, seconds: Double = 1.0) async throws {
+        try? FileManager.default.removeItem(at: url)
+        let w = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let size = CGSize(width: 320, height: 240)
+        let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 240])
+        let ad = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: vIn,
+            sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        let aIn = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000])
+        aIn.expectsMediaDataInRealTime = false
+        w.add(vIn); w.add(aIn); w.startWriting(); w.startSession(atSourceTime: .zero)
+        let fps: Int32 = 30, total = Int(Double(fps) * seconds)
+        for i in 0..<total {
+            while !vIn.isReadyForMoreMediaData { usleep(400) }
+            var pb: CVPixelBuffer!
+            CVPixelBufferCreate(nil, 320, 240, kCVPixelFormatType_32BGRA, nil, &pb)
+            ad.append(pb, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: fps))
+        }
+        vIn.markAsFinished()
+        // Silent 16-bit mono PCM buffers, 44.1kHz.
+        let sr = 44100.0, chunk = 4410
+        var asbd = AudioStreamBasicDescription(mSampleRate: sr, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+            mBitsPerChannel: 16, mReserved: 0)
+        var fmt: CMFormatDescription?
+        CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil,
+            magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &fmt)
+        var t = 0
+        while Double(t) / sr < seconds {
+            while !aIn.isReadyForMoreMediaData { usleep(400) }
+            let bytes = chunk * 2
+            var block: CMBlockBuffer?
+            CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes,
+                blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: bytes,
+                flags: 0, blockBufferOut: &block)
+            CMBlockBufferFillDataBytes(with: 0, blockBuffer: block!, offsetIntoDestination: 0, dataLength: bytes)
+            var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: CMTimeScale(sr)),
+                presentationTimeStamp: CMTime(value: CMTimeValue(t), timescale: CMTimeScale(sr)),
+                decodeTimeStamp: .invalid)
+            var sb: CMSampleBuffer?
+            CMSampleBufferCreate(allocator: nil, dataBuffer: block, dataReady: true,
+                makeDataReadyCallback: nil, refcon: nil, formatDescription: fmt,
+                sampleCount: chunk, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+                sampleSizeEntryCount: 1, sampleSizeArray: [2], sampleBufferOut: &sb)
+            if let sb { aIn.append(sb) }
+            t += chunk
+        }
+        aIn.markAsFinished()
+        await w.finishWriting()
+    }
+
+    func testMuteAudioDropsTrack() async throws {
+        let src = tmp("mute-src.mp4"); try await makeVideoWithAudio(src)
+        let srcAudio = try await AVURLAsset(url: src).loadTracks(withMediaType: .audio).count
+        XCTAssertEqual(srcAudio, 1, "source must have an audio track to test muting")
+        // Passthrough keeps the audio…
+        let keep = tmp("mute-keep.mp4")
+        try await StyledExport.export(source: src, to: keep, style: StyleOptions())
+        let keepAudio = try await AVURLAsset(url: keep).loadTracks(withMediaType: .audio).count
+        XCTAssertEqual(keepAudio, 1)
+        // …mute drops it.
+        var s = StyleOptions(); s.muteAudio = true
+        let muted = tmp("mute-off.mp4")
+        try await StyledExport.export(source: src, to: muted, style: s)
+        let mutedAudio = try await AVURLAsset(url: muted).loadTracks(withMediaType: .audio).count
+        XCTAssertEqual(mutedAudio, 0, "muteAudio must drop the audio track")
+    }
+
     func testWebcamCropZoomExports() async throws {
         let src = tmp("wcz-src.mp4"); try await makeVideo(src)
         let cam = WebcamRecorder.sidecarURL(for: src)

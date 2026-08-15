@@ -67,6 +67,7 @@ struct StyleOptions: Equatable {
     var backgroundBlur: Double = 0         // 0 = off; blurs the source behind as the backdrop
     var aspect: Aspect = .source
     var deviceFrame: DeviceFrame = .none   // optional window/browser chrome around the footage
+    var muteAudio: Bool = false            // drop the source audio from the export
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
     struct CropInsets: Equatable {
@@ -215,10 +216,13 @@ enum StyledExport {
         }
         try compV.insertTimeRange(srcRange, of: vTrack, at: .zero)
         compV.preferredTransform = transform
-        for aTrack in try await srcAsset.loadTracks(withMediaType: .audio) {
-            if let compA = comp.addMutableTrack(withMediaType: .audio,
-                                                preferredTrackID: kCMPersistentTrackID_Invalid) {
-                try? compA.insertTimeRange(srcRange, of: aTrack, at: .zero)
+        // Audio passes through unless muted (Recordly's mute control).
+        if !style.muteAudio {
+            for aTrack in try await srcAsset.loadTracks(withMediaType: .audio) {
+                if let compA = comp.addMutableTrack(withMediaType: .audio,
+                                                    preferredTrackID: kCMPersistentTrackID_Invalid) {
+                    try? compA.insertTimeRange(srcRange, of: aTrack, at: .zero)
+                }
             }
         }
 
