@@ -198,6 +198,68 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class RecordingClockTests: XCTestCase {
+    func testElapsedGrowsWhileRunning() {
+        var c = RecordingClock()
+        c.start(at: 1000)
+        XCTAssertEqual(c.elapsedMs(at: 1000), 0, accuracy: 1e-9)
+        XCTAssertEqual(c.elapsedMs(at: 3500), 2500, accuracy: 1e-9)
+        XCTAssertTrue(c.isRunning)
+        XCTAssertFalse(c.isPaused)
+    }
+
+    func testPauseFreezesElapsed() {
+        var c = RecordingClock()
+        c.start(at: 0)
+        c.pause(at: 2000)                       // elapsed frozen at 2000
+        XCTAssertTrue(c.isPaused)
+        XCTAssertEqual(c.elapsedMs(at: 2000), 2000, accuracy: 1e-9)
+        XCTAssertEqual(c.elapsedMs(at: 5000), 2000, accuracy: 1e-9, "time during pause must not count")
+    }
+
+    func testResumeExcludesPausedSpan() {
+        var c = RecordingClock()
+        c.start(at: 0)
+        c.pause(at: 2000)
+        c.resume(at: 5000)                      // 3000ms paused, folded out
+        XCTAssertFalse(c.isPaused)
+        XCTAssertEqual(c.elapsedMs(at: 6000), 3000, accuracy: 1e-9, "6000 wall − 3000 paused")
+    }
+
+    func testMultiplePausesAccumulate() {
+        var c = RecordingClock()
+        c.start(at: 0)
+        c.pause(at: 1000); c.resume(at: 1500)   // 500 paused
+        c.pause(at: 3000); c.resume(at: 3200)   // +200 paused = 700
+        XCTAssertEqual(c.elapsedMs(at: 5000), 4300, accuracy: 1e-9, "5000 − 700 paused")
+    }
+
+    func testIdleGuardsAndReset() {
+        var c = RecordingClock()
+        c.pause(at: 100); c.resume(at: 200)     // no-ops before start
+        XCTAssertEqual(c.elapsedMs(at: 500), 0, accuracy: 1e-9)
+        c.start(at: 0)
+        c.resume(at: 100)                       // resume without a pause is a no-op
+        XCTAssertEqual(c.elapsedMs(at: 1000), 1000, accuracy: 1e-9)
+        c.reset()
+        XCTAssertFalse(c.isRunning)
+        XCTAssertEqual(c.elapsedMs(at: 9999), 0, accuracy: 1e-9)
+    }
+
+    func testCountdown() {
+        var cd = Countdown(delaySeconds: 3)
+        XCTAssertEqual(cd.remainingSeconds(at: 0), 3)   // not begun → full delay
+        cd.begin(at: 1000)
+        XCTAssertEqual(cd.remainingSeconds(at: 1000), 3)
+        XCTAssertEqual(cd.remainingSeconds(at: 2200), 2)   // 1.2s in
+        XCTAssertEqual(cd.remainingSeconds(at: 4000), 0)
+        XCTAssertFalse(cd.isFinished(at: 3900))
+        XCTAssertTrue(cd.isFinished(at: 4000))
+        cd.cancel()
+        XCTAssertFalse(cd.isFinished(at: 9999))
+    }
+}
+
 final class ExportDimensionsTests: XCTestCase {
     func testAspectFitsWithinSourceBox() {
         // Square export of a 1080p clip fits the short side (1080²), never upscales to 1920².

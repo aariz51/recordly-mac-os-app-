@@ -30,6 +30,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     }
 
     @Published private(set) var isRecording = false
+    @Published private(set) var isPaused = false
     @Published private(set) var elapsed: TimeInterval = 0
     @Published var captureMicrophone = false
     @Published var captureSystemAudio = true
@@ -43,7 +44,10 @@ final class ScreenRecorder: NSObject, ObservableObject {
     private var micInput: AVAssetWriterInput?
     private var sessionStarted = false
     private var timer: Timer?
-    private var wallStart: Date?
+    private var clock = RecordingClock()
+
+    /// Wall-clock milliseconds, the unit `RecordingClock` works in.
+    private static func nowMs() -> Double { Date().timeIntervalSince1970 * 1000 }
 
     private let sampleQueue = DispatchQueue(label: "com.aariz51.reclip.sample")
     private let cursorSampler = CursorSampler()
@@ -124,10 +128,25 @@ final class ScreenRecorder: NSObject, ObservableObject {
 
         try await stream.startCapture()
         isRecording = true
-        wallStart = Date()
+        clock.start(at: Self.nowMs())
         cursorSampler.start()
         if captureWebcam { webcamRecorder.start(besides: url) }
         startElapsedTimer()
+    }
+
+    /// Pauses the timer and drops incoming frames until `resume()`. The paused span is
+    /// excluded from `elapsed` (see RecordingClock). Note: dropped frames leave the
+    /// paused wall-time as a held frame in the output; a PTS-offset pause is future work.
+    func pause() {
+        guard isRecording, !isPaused else { return }
+        clock.pause(at: Self.nowMs())
+        isPaused = true
+    }
+
+    func resume() {
+        guard isRecording, isPaused else { return }
+        clock.resume(at: Self.nowMs())
+        isPaused = false
     }
 
     func stop() async throws {
@@ -202,14 +221,16 @@ final class ScreenRecorder: NSObject, ObservableObject {
         timer?.invalidate()
         timer = nil
         elapsed = 0
+        isPaused = false
+        clock.reset()
     }
 
     private func startElapsedTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, let start = self.wallStart else { return }
-                self.elapsed = Date().timeIntervalSince(start)
+                guard let self, self.clock.isRunning else { return }
+                self.elapsed = self.clock.elapsedMs(at: Self.nowMs()) / 1000.0
             }
         }
     }
@@ -227,6 +248,7 @@ extension ScreenRecorder: SCStreamOutput {
 
     private func append(_ sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard let writer, writer.status == .writing else { return }
+        if isPaused { return }              // drop frames while paused
 
         if !sessionStarted {
             writer.startSession(atSourceTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
