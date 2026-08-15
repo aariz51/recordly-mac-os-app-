@@ -49,8 +49,9 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | **Undo / redo** | ❌ | — |
 | **Drag/resize regions on a timeline** | ❌ | UI (UI dev) |
 | Auto zoom (cursor) | ✅ | ZoomTimeline.autoZoom |
-| **Manual zoom regions (add/edit)** | 🟡 | model supports; no add API |
-| **Zoom depth presets (6) / manual focus / easing / connect / motion-blur tuning** | ❌ | single scale + ramp only |
+| **Manual zoom regions (add/edit)** | ✅ | ZoomTimeline.addRegion + depth presets |
+| Zoom depth presets (6) + manual focus + easing (4 curves) | ✅ | ZoomDepth + ZoomEasing |
+| **Zoom connect-neighbors / motion-blur tuning** | ❌ | not implemented |
 | **Speed regions (per-segment)** | 🟡 | global speed only |
 | **Playback controls (play/pause/skip/volume)** | 🟡 | preview loops; no scrub UI |
 
@@ -79,7 +80,7 @@ it captures the real cursor. This is the single largest missing feature.
 | Shadow | ✅ | batch 1 |
 | Margin | ✅ | batch 1 |
 | **React-to-zoom scaling** | ❌ | — |
-| **Independent width + height** | 🟡 | square only |
+| **Independent width + height** | ✅ | WebcamSettings.aspectRatio |
 | **9-cell position + custom X/Y** | 🟡 | 4 corners |
 | **Crop control** | ❌ | — |
 | **Upload / replace / remove footage** | ❌ | live only |
