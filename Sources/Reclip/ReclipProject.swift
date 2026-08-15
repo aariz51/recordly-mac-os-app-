@@ -8,6 +8,7 @@ struct ReclipProject: Codable, Equatable {
     var sourceFileName: String
 
     var background: BG
+    var backgroundImageB64: String? = nil
     var paddingFraction: Double
     var cornerRadiusFraction: Double
     var shadowOpacity: Double
@@ -89,6 +90,7 @@ struct ReclipProject: Codable, Equatable {
         ReclipProject(
             sourceFileName: source.lastPathComponent,
             background: .from(style.background),
+            backgroundImageB64: style.backgroundImage?.base64EncodedString(),
             paddingFraction: style.paddingFraction,
             cornerRadiusFraction: style.cornerRadiusFraction,
             shadowOpacity: style.shadowOpacity,
@@ -117,6 +119,7 @@ struct ReclipProject: Codable, Equatable {
     func style() -> StyleOptions {
         var s = StyleOptions()
         s.background = background.toBackground()
+        s.backgroundImage = backgroundImageB64.flatMap { Data(base64Encoded: $0) }
         s.paddingFraction = paddingFraction
         s.cornerRadiusFraction = cornerRadiusFraction
         s.shadowOpacity = shadowOpacity

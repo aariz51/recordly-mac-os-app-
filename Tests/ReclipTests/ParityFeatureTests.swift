@@ -231,6 +231,49 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testBackgroundPresetLibrary() {
+        let all = BackgroundPresets.all
+        XCTAssertGreaterThanOrEqual(all.count, 12, "should offer a full preset gallery")
+        XCTAssertEqual(Set(all.map(\.id)).count, all.count, "preset ids must be unique")
+        XCTAssertNotNil(BackgroundPresets.preset(id: "aurora"))
+        XCTAssertNil(BackgroundPresets.preset(id: "nope"))
+    }
+
+    func testPresetBackgroundExports() async throws {
+        let src = tmp("preset-src.mp4"); try await makeVideo(src)
+        for id in ["aurora", "graphite", "ocean"] {
+            var s = StyleOptions(); s.background = try XCTUnwrap(BackgroundPresets.preset(id: id)).background
+            let out = tmp("preset-\(id).mp4")
+            try await StyledExport.export(source: src, to: out, style: s)
+            try await assertValid(out)
+        }
+    }
+
+    func testImageBackgroundExports() async throws {
+        let src = tmp("imgbg-src.mp4"); try await makeVideo(src)
+        // Build a small PNG to use as the wallpaper background.
+        let img = NSImage(size: NSSize(width: 200, height: 200))
+        img.lockFocus(); NSColor.systemTeal.setFill(); NSRect(x: 0, y: 0, width: 200, height: 200).fill(); img.unlockFocus()
+        let tiff = try XCTUnwrap(img.tiffRepresentation)
+        let png = try XCTUnwrap(NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]))
+        var s = StyleOptions(); s.backgroundImage = png; s.paddingFraction = 0.1
+        let out = tmp("imgbg.mp4")
+        try await StyledExport.export(source: src, to: out, style: s)
+        try await assertValid(out)
+    }
+
+    func testImageBackgroundProjectRoundTrip() throws {
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 1, 2, 3, 4])   // arbitrary bytes; round-trip is byte-exact
+        var s = StyleOptions(); s.backgroundImage = png
+        let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
+                                            style: s, zoom: ZoomTimeline(), webcam: WebcamSettings(),
+                                            annotations: [], trimStart: 0, trimEnd: 0, speed: 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("imgbg.reclip")
+        try project.save(to: url)
+        let loaded = try ReclipProject.load(from: url)
+        XCTAssertEqual(loaded.style().backgroundImage, png)
+    }
+
     func testShadowProfilesDecreasePerLayer() {
         let p = StyledExport.videoShadowProfiles
         XCTAssertEqual(p.count, 3)                                    // Recordly's 3-layer video shadow

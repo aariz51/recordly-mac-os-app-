@@ -41,6 +41,10 @@ struct StyleOptions: Equatable {
     }
 
     var background: Background = .gradient(topRGB: (0.39, 0.36, 1.0), bottomRGB: (0.66, 0.33, 0.97))
+    /// Optional user-supplied wallpaper. When set, it is aspect-filled behind the footage
+    /// and takes precedence over `background`. Kept as a separate field (rather than a new
+    /// `Background` case) so existing exhaustive switches over `Background` are unaffected.
+    var backgroundImage: Data? = nil
     var paddingFraction: Double = 0.06     // fraction of the shorter side
     var cornerRadiusFraction: Double = 0.03
     var shadowOpacity: Double = 0.35
@@ -203,7 +207,8 @@ enum StyledExport {
         let padding = shortSide * style.paddingFraction
         let corner = shortSide * style.cornerRadiusFraction
         let ciContext = CIContext()
-        let staticBackground = makeBackground(style.background, size: canvas)
+        let staticBackground = style.backgroundImage.map { makeImageBackground($0, size: canvas) }
+            ?? makeBackground(style.background, size: canvas)
         let renderedAnnotations = Annotations.prerender(annotations, canvas: canvas)
         let trimStart = srcRange.start.seconds
         let blur = style.backgroundBlur
@@ -656,5 +661,19 @@ enum StyledExport {
             g.color1 = CIColor(red: bottom.0, green: bottom.1, blue: bottom.2)
             return (g.outputImage ?? CIImage(color: .gray)).cropped(to: rect)
         }
+    }
+
+    /// Aspect-fills a user-supplied wallpaper image across the canvas, centered.
+    private static func makeImageBackground(_ data: Data, size: CGSize) -> CIImage {
+        let rect = CGRect(origin: .zero, size: size)
+        guard let img = CIImage(data: data), img.extent.width > 0, img.extent.height > 0 else {
+            return CIImage(color: CIColor(red: 0.1, green: 0.1, blue: 0.12)).cropped(to: rect)
+        }
+        let scale = max(size.width / img.extent.width, size.height / img.extent.height)
+        let scaled = img.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let e = scaled.extent
+        return scaled.transformed(by: CGAffineTransform(
+            translationX: (size.width - e.width) / 2 - e.minX,
+            y: (size.height - e.height) / 2 - e.minY)).cropped(to: rect)
     }
 }
