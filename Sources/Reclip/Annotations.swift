@@ -1,23 +1,33 @@
 import Foundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import CoreText
 import CoreGraphics
 import AppKit
 
-/// A text caption shown over the video for a time range at a normalized position.
+/// An overlay shown over the video for a time range at a normalized position. Text by
+/// default; also image, arrow, box (censor), and blur region types (Recordly parity).
 struct Annotation: Identifiable, Equatable {
+    enum Kind: String, Equatable { case text, image, arrow, box, blur }
+
     var id = UUID()
     var text: String
     var start: Double
     var end: Double
-    var position: CGPoint = CGPoint(x: 0.5, y: 0.12)   // normalized, top-left origin
-    var fontFraction: Double = 0.05                     // of canvas height
+    var position: CGPoint = CGPoint(x: 0.5, y: 0.12)   // normalized center, top-left origin
+    var fontFraction: Double = 0.05                     // of canvas height (text)
+    // Extra fields (defaulted so text captions stay source-compatible):
+    var kind: Kind = .text
+    var regionSize: CGSize = CGSize(width: 0.3, height: 0.2) // normalized, for region kinds
+    var blurRadius: Double = 24                          // for .blur
+    var colorRGBA: [Double] = [0, 0, 0, 0.85]            // for .box fill / .arrow stroke
+    var imageData: Data? = nil                           // for .image
 }
 
-/// An annotation with its text pre-rendered to an image (built once per composition).
+/// An annotation with any pre-rendered image (text/image kinds); region kinds render live.
 struct RenderedAnnotation {
     let annotation: Annotation
-    let image: CIImage
+    let image: CIImage?
     let pixelSize: CGSize
 }
 
@@ -61,9 +71,18 @@ enum Annotations {
 
     static func prerender(_ annotations: [Annotation], canvas: CGSize) -> [RenderedAnnotation] {
         annotations.compactMap { a in
-            let fontSize = canvas.height * a.fontFraction
-            guard let (image, size) = render(a.text, fontSize: fontSize) else { return nil }
-            return RenderedAnnotation(annotation: a, image: image, pixelSize: size)
+            switch a.kind {
+            case .text:
+                let fontSize = canvas.height * a.fontFraction
+                guard let (image, size) = render(a.text, fontSize: fontSize) else { return nil }
+                return RenderedAnnotation(annotation: a, image: image, pixelSize: size)
+            case .image:
+                guard let data = a.imageData, let ci = CIImage(data: data) else { return nil }
+                return RenderedAnnotation(annotation: a, image: ci, pixelSize: ci.extent.size)
+            case .arrow, .box, .blur:
+                // Rendered live in composite() against the base frame.
+                return RenderedAnnotation(annotation: a, image: nil, pixelSize: .zero)
+            }
         }
     }
 
@@ -71,12 +90,84 @@ enum Annotations {
                           rendered: [RenderedAnnotation], time: Double) -> CIImage {
         var result = base
         for r in rendered where time >= r.annotation.start && time <= r.annotation.end {
-            let px = r.annotation.position.x * canvas.width - r.pixelSize.width / 2
-            // normalized top-left -> CI bottom-left origin
-            let py = (1 - r.annotation.position.y) * canvas.height - r.pixelSize.height / 2
-            let placed = r.image.transformed(by: CGAffineTransform(translationX: px, y: py))
-            result = placed.composited(over: result)
+            let a = r.annotation
+            switch a.kind {
+            case .text:
+                guard let image = r.image else { continue }
+                let px = a.position.x * canvas.width - r.pixelSize.width / 2
+                let py = (1 - a.position.y) * canvas.height - r.pixelSize.height / 2
+                result = image.transformed(by: CGAffineTransform(translationX: px, y: py)).composited(over: result)
+            case .image:
+                guard let image = r.image else { continue }
+                result = placeInRegion(image, annotation: a, canvas: canvas).composited(over: result)
+            case .box:
+                let rect = regionRect(a, canvas: canvas)
+                let c = a.colorRGBA
+                let fill = CIImage(color: CIColor(red: c[0], green: c[1], blue: c[2], alpha: c.count > 3 ? c[3] : 1))
+                    .cropped(to: rect)
+                result = fill.composited(over: result)
+            case .blur:
+                let rect = regionRect(a, canvas: canvas)
+                let region = result.cropped(to: rect)
+                let blur = CIFilter.gaussianBlur()
+                blur.inputImage = region.clampedToExtent()
+                blur.radius = Float(a.blurRadius)
+                if let blurred = blur.outputImage?.cropped(to: rect) {
+                    result = blurred.composited(over: result)
+                }
+            case .arrow:
+                if let arrow = makeArrow(a, canvas: canvas) {
+                    result = arrow.composited(over: result)
+                }
+            }
         }
         return result
+    }
+
+    /// Region rect in CI (bottom-left origin) canvas pixels.
+    private static func regionRect(_ a: Annotation, canvas: CGSize) -> CGRect {
+        let w = a.regionSize.width * canvas.width
+        let h = a.regionSize.height * canvas.height
+        let cx = a.position.x * canvas.width
+        let cy = (1 - a.position.y) * canvas.height
+        return CGRect(x: cx - w / 2, y: cy - h / 2, width: max(w, 1), height: max(h, 1))
+    }
+
+    private static func placeInRegion(_ image: CIImage, annotation a: Annotation, canvas: CGSize) -> CIImage {
+        let rect = regionRect(a, canvas: canvas)
+        let e = image.extent
+        guard e.width > 0, e.height > 0 else { return image }
+        let scale = min(rect.width / e.width, rect.height / e.height)
+        let scaled = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let se = scaled.extent
+        return scaled.transformed(by: CGAffineTransform(translationX: rect.midX - se.midX,
+                                                        y: rect.midY - se.midY))
+    }
+
+    private static func makeArrow(_ a: Annotation, canvas: CGSize) -> CIImage? {
+        let rect = regionRect(a, canvas: canvas)
+        let w = Int(ceil(rect.width)), h = Int(ceil(rect.height))
+        guard w > 1, h > 1,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let c = a.colorRGBA
+        ctx.setShouldAntialias(true)
+        let W = CGFloat(w), H = CGFloat(h)
+        // Left→right arrow: shaft + head.
+        ctx.setStrokeColor(CGColor(red: c[0], green: c[1], blue: c[2], alpha: c.count > 3 ? c[3] : 1))
+        ctx.setLineWidth(max(2, min(W, H) * 0.12))
+        ctx.setLineCap(.round)
+        ctx.move(to: CGPoint(x: W * 0.1, y: H * 0.5))
+        ctx.addLine(to: CGPoint(x: W * 0.8, y: H * 0.5))
+        ctx.strokePath()
+        ctx.setFillColor(CGColor(red: c[0], green: c[1], blue: c[2], alpha: c.count > 3 ? c[3] : 1))
+        ctx.move(to: CGPoint(x: W * 0.95, y: H * 0.5))
+        ctx.addLine(to: CGPoint(x: W * 0.72, y: H * 0.72))
+        ctx.addLine(to: CGPoint(x: W * 0.72, y: H * 0.28))
+        ctx.closePath()
+        ctx.fillPath()
+        guard let cg = ctx.makeImage() else { return nil }
+        return CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
     }
 }

@@ -2,6 +2,7 @@ import XCTest
 import AVFoundation
 import CoreGraphics
 import ImageIO
+import AppKit
 @testable import Reclip
 
 /// Functional tests for the parity features added this session: crop, background blur,
@@ -161,5 +162,34 @@ final class ParityFeatureTests: XCTestCase {
                                           cursor: track, cursorStyle: cs)
             try await assertValid(out)
         }
+    }
+
+    func testRichAnnotationsExport() async throws {
+        let src = tmp("ann-src.mp4"); try await makeVideo(src)
+        var blur = Annotation(text: "", start: 0.1, end: 1.0)
+        blur.kind = .blur; blur.position = CGPoint(x: 0.3, y: 0.3)
+        blur.regionSize = CGSize(width: 0.2, height: 0.2); blur.blurRadius = 30
+        var box = Annotation(text: "", start: 0.1, end: 1.0)
+        box.kind = .box; box.position = CGPoint(x: 0.7, y: 0.3); box.colorRGBA = [0, 0, 0, 0.9]
+        var arrow = Annotation(text: "", start: 0.1, end: 1.0)
+        arrow.kind = .arrow; arrow.position = CGPoint(x: 0.5, y: 0.7); arrow.colorRGBA = [1, 0.3, 0.3, 1]
+        let out = tmp("ann.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(),
+                                      annotations: [blur, box, arrow])
+        try await assertValid(out)
+    }
+
+    func testImageAnnotationExport() async throws {
+        let src = tmp("img-src.mp4"); try await makeVideo(src)
+        let img = NSImage(size: NSSize(width: 60, height: 40))
+        img.lockFocus(); NSColor.systemRed.setFill(); NSRect(x: 0, y: 0, width: 60, height: 40).fill(); img.unlockFocus()
+        guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return XCTFail("no png") }
+        var ann = Annotation(text: "", start: 0.1, end: 1.0)
+        ann.kind = .image; ann.imageData = png
+        ann.position = CGPoint(x: 0.5, y: 0.5); ann.regionSize = CGSize(width: 0.25, height: 0.25)
+        let out = tmp("img.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(), annotations: [ann])
+        try await assertValid(out)
     }
 }
