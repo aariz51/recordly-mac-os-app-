@@ -231,8 +231,8 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
-    /// Writes a short clip that has BOTH a video and a (silent) audio track.
-    private func makeVideoWithAudio(_ url: URL, seconds: Double = 1.0) async throws {
+    /// Writes a short clip that has BOTH a video and an audio track (silent, or a 440Hz tone).
+    private func makeVideoWithAudio(_ url: URL, seconds: Double = 1.0, tone: Bool = false) async throws {
         try? FileManager.default.removeItem(at: url)
         let w = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let size = CGSize(width: 320, height: 240)
@@ -269,8 +269,20 @@ final class ParityFeatureTests: XCTestCase {
             var block: CMBlockBuffer?
             CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes,
                 blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: bytes,
-                flags: 0, blockBufferOut: &block)
-            CMBlockBufferFillDataBytes(with: 0, blockBuffer: block!, offsetIntoDestination: 0, dataLength: bytes)
+                flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
+            if tone {
+                var samples = [Int16](repeating: 0, count: chunk)
+                for i in 0..<chunk {
+                    let phase = 2.0 * Double.pi * 440.0 * Double(t + i) / sr
+                    samples[i] = Int16(sin(phase) * 16000)
+                }
+                samples.withUnsafeBytes { raw in
+                    _ = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block!,
+                                                      offsetIntoDestination: 0, dataLength: bytes)
+                }
+            } else {
+                CMBlockBufferFillDataBytes(with: 0, blockBuffer: block!, offsetIntoDestination: 0, dataLength: bytes)
+            }
             var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: CMTimeScale(sr)),
                 presentationTimeStamp: CMTime(value: CMTimeValue(t), timescale: CMTimeScale(sr)),
                 decodeTimeStamp: .invalid)
@@ -284,6 +296,42 @@ final class ParityFeatureTests: XCTestCase {
         }
         aIn.markAsFinished()
         await w.finishWriting()
+    }
+
+    /// Decodes a file's audio and returns its RMS level (0 if no audio).
+    private func audioRMS(_ url: URL) async throws -> Double {
+        let asset = AVURLAsset(url: url)
+        guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return 0 }
+        let reader = try AVAssetReader(asset: asset)
+        let out = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false])
+        reader.add(out); reader.startReading()
+        var sumSq = 0.0, n = 0
+        while reader.status == .reading, let sb = out.copyNextSampleBuffer() {
+            guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
+            var len = 0; var ptr: UnsafeMutablePointer<Int8>?
+            CMBlockBufferGetDataPointer(bb, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &len, dataPointerOut: &ptr)
+            if let ptr, len > 1 {
+                ptr.withMemoryRebound(to: Int16.self, capacity: len / 2) { p in
+                    for i in 0..<(len / 2) { let v = Double(p[i]); sumSq += v * v; n += 1 }
+                }
+            }
+        }
+        return n > 0 ? (sumSq / Double(n)).squareRoot() : 0
+    }
+
+    func testAudioVolumeScalesLevel() async throws {
+        let src = tmp("vol-src.mp4"); try await makeVideoWithAudio(src, seconds: 1.0, tone: true)
+        var loud = StyleOptions(); loud.audioVolume = 1.0
+        let loudURL = tmp("vol-loud.mp4"); try await StyledExport.export(source: src, to: loudURL, style: loud)
+        var quiet = StyleOptions(); quiet.audioVolume = 0.25
+        let quietURL = tmp("vol-quiet.mp4"); try await StyledExport.export(source: src, to: quietURL, style: quiet)
+        let loudRMS = try await audioRMS(loudURL)
+        let quietRMS = try await audioRMS(quietURL)
+        XCTAssertGreaterThan(loudRMS, 100, "full-volume export should carry an audible tone")
+        XCTAssertLessThan(quietRMS, loudRMS * 0.6, "0.25 gain should be clearly quieter than 1.0")
     }
 
     func testMuteAudioDropsTrack() async throws {

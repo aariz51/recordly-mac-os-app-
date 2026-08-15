@@ -68,6 +68,7 @@ struct StyleOptions: Equatable {
     var aspect: Aspect = .source
     var deviceFrame: DeviceFrame = .none   // optional window/browser chrome around the footage
     var muteAudio: Bool = false            // drop the source audio from the export
+    var audioVolume: Double = 1.0          // 0…2 gain applied to the source audio
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
     struct CropInsets: Equatable {
@@ -174,6 +175,7 @@ enum StyledExport {
         let asset: AVAsset
         let video: AVMutableVideoComposition
         let duration: Double
+        var audioMix: AVAudioMix? = nil
     }
 
     /// Builds a trimmed + speed-adjusted composition and its styled Core Image video
@@ -283,7 +285,22 @@ enum StyledExport {
             request.finish(with: withCaptions, context: nil)
         }
         video.renderSize = canvas
-        return StyledTimeline(asset: comp, video: video, duration: comp.duration.seconds)
+
+        // Optional audio-gain mix (Recordly's volume control).
+        var audioMix: AVAudioMix? = nil
+        if !style.muteAudio, abs(style.audioVolume - 1.0) > 0.001 {
+            let audioTracks = comp.tracks(withMediaType: .audio)
+            if !audioTracks.isEmpty {
+                let mix = AVMutableAudioMix()
+                mix.inputParameters = audioTracks.map { track in
+                    let p = AVMutableAudioMixInputParameters(track: track)
+                    p.setVolume(Float(max(0, min(style.audioVolume, 2.0))), at: .zero)
+                    return p
+                }
+                audioMix = mix
+            }
+        }
+        return StyledTimeline(asset: comp, video: video, duration: comp.duration.seconds, audioMix: audioMix)
     }
 
     /// Aspect-fills the frame across the whole canvas, blurred and darkened, as a backdrop.
@@ -362,6 +379,7 @@ enum StyledExport {
             throw StyledExportError.exportSessionFailed("could not create export session")
         }
         export.videoComposition = tl.video
+        export.audioMix = tl.audioMix
         export.outputURL = output
         export.outputFileType = .mp4
         try? FileManager.default.removeItem(at: output)
@@ -428,6 +446,7 @@ enum StyledExport {
                 AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16,
                 AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
                 AVLinearPCMIsNonInterleaved: false, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 2])
+            o.audioMix = tl.audioMix    // apply the volume gain in the re-encode path too
             if reader.canAdd(o) { reader.add(o); aOut = o }
         }
 

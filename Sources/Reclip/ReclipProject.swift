@@ -17,6 +17,7 @@ struct ReclipProject: Codable, Equatable {
     var aspect: String
     var deviceFrame: String = DeviceFrame.none.rawValue
     var muteAudio: Bool = false
+    var audioVolume: Double = 1.0
     var crop: Crop
     var padInsets: Pad? = nil
 
@@ -109,6 +110,7 @@ struct ReclipProject: Codable, Equatable {
             aspect: style.aspect.rawValue,
             deviceFrame: style.deviceFrame.rawValue,
             muteAudio: style.muteAudio,
+            audioVolume: style.audioVolume,
             crop: Crop(top: style.crop.top, bottom: style.crop.bottom, left: style.crop.left, right: style.crop.right),
             padInsets: style.paddingInsets.map { Pad(top: $0.top, bottom: $0.bottom, left: $0.left, right: $0.right) },
             zoomRegions: zoom.regions.map { Zoom(start: $0.start, end: $0.end, scale: Double($0.scale), fx: $0.focus.x, fy: $0.focus.y) },
@@ -143,6 +145,7 @@ struct ReclipProject: Codable, Equatable {
         s.aspect = StyleOptions.Aspect(rawValue: aspect) ?? .source
         s.deviceFrame = DeviceFrame(rawValue: deviceFrame) ?? .none
         s.muteAudio = muteAudio
+        s.audioVolume = audioVolume
         s.crop = StyleOptions.CropInsets(top: crop.top, bottom: crop.bottom, left: crop.left, right: crop.right)
         s.paddingInsets = padInsets.map { StyleOptions.PaddingInsets(top: $0.top, bottom: $0.bottom, left: $0.left, right: $0.right) }
         return s
