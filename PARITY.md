@@ -109,7 +109,8 @@ caption styling, inline editing, karaoke renderer, SRT/VTT export. **Reclip has 
 | MP4 (H.264/AAC) | ✅ | StyledExport |
 | GIF | ✅ | GifExport |
 | MP4 quality (4 levels) | 🟡 | 3 levels (batch 1) |
-| **MP4 encoding mode / frame rate (24/30/60) / HW accel** | ❌ | fixed |
+| **MP4 frame rate (24/30/60)** | ❌ | composition.frameDuration proven ineffective; needs AVAssetWriter re-encode |
+| **MP4 encoding mode / HW accel** | ❌ | fixed |
 | GIF loop toggle | ✅ | batch 1 |
 | GIF frame-rate (4) + size presets (3) | 🟡 | params exist; presets not enumerated |
 | Output dimension control | 🟡 | via aspect (batch 2) |
@@ -118,7 +119,7 @@ caption styling, inline editing, karaoke renderer, SRT/VTT export. **Reclip has 
 | Export progress phases | ❌ | busy flag only |
 
 ## 9. Platform / workflow  (mostly ❌)
-Project files (`.recordia`), project browser, autosave, dirty-state/recovery, ~50 persisted
+Project files: **`.reclip` save/reopen of full editor state ✅ (ReclipProject)**; project browser, autosave, dirty-state/recovery, ~50 persisted
 prefs + named presets, rebindable keyboard shortcuts + reference, auto-update, theme,
 **9-locale i18n**, custom fonts, and the **entire extension/plugin + marketplace system** —
 **none present in Reclip.**

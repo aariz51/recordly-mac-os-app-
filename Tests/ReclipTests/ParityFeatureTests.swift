@@ -123,4 +123,5 @@ final class ParityFeatureTests: XCTestCase {
             XCTAssertGreaterThan(CGImageSourceGetCount(s!), 1)
         }
     }
+
 }
