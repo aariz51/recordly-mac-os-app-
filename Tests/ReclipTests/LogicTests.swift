@@ -198,6 +198,43 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class MediaTimingTests: XCTestCase {
+    func testClampMediaTime() {
+        XCTAssertEqual(MediaTiming.clampMediaTime(5, duration: 10), 5, accuracy: 1e-9)
+        XCTAssertEqual(MediaTiming.clampMediaTime(15, duration: 10), 10, accuracy: 1e-9)
+        XCTAssertEqual(MediaTiming.clampMediaTime(-3, duration: 10), 0, accuracy: 1e-9)
+        XCTAssertEqual(MediaTiming.clampMediaTime(7, duration: nil), 7, accuracy: 1e-9, "nil duration → unchanged")
+    }
+
+    func testEffectiveStreamDuration() {
+        // Small mismatch → trust the stream duration.
+        XCTAssertEqual(MediaTiming.effectiveStreamDurationSeconds(duration: 10, streamDuration: 9.9), 9.9, accuracy: 1e-9)
+        // Large mismatch (>max(2, 10%)) → fall back to the container duration.
+        XCTAssertEqual(MediaTiming.effectiveStreamDurationSeconds(duration: 10, streamDuration: 5), 10, accuracy: 1e-9)
+        // One side missing → use the other; both missing → 0.
+        XCTAssertEqual(MediaTiming.effectiveStreamDurationSeconds(duration: nil, streamDuration: 8), 8, accuracy: 1e-9)
+        XCTAssertEqual(MediaTiming.effectiveStreamDurationSeconds(duration: 12, streamDuration: nil), 12, accuracy: 1e-9)
+        XCTAssertEqual(MediaTiming.effectiveStreamDurationSeconds(duration: nil, streamDuration: nil), 0, accuracy: 1e-9)
+    }
+
+    func testEffectiveRecordingDurationMatchesClock() {
+        // Same scenario as RecordingClock: 5000ms wall, 700ms paused → 4300ms.
+        XCTAssertEqual(MediaTiming.effectiveRecordingDurationMs(
+            startTimeMs: 0, endTimeMs: 5000, accumulatedPausedDurationMs: 700), 4300, accuracy: 1e-9)
+        // Active (in-progress) pause is also excluded.
+        XCTAssertEqual(MediaTiming.effectiveRecordingDurationMs(
+            startTimeMs: 0, endTimeMs: 5000, accumulatedPausedDurationMs: 0, pauseStartedAtMs: 3000),
+            3000, accuracy: 1e-9)
+        // Equivalence with RecordingClock on the same inputs.
+        var clock = RecordingClock()
+        clock.start(at: 0); clock.pause(at: 2000); clock.resume(at: 2700)
+        XCTAssertEqual(clock.elapsedMs(at: 5000),
+                       MediaTiming.effectiveRecordingDurationMs(startTimeMs: 0, endTimeMs: 5000,
+                                                                accumulatedPausedDurationMs: 700),
+                       accuracy: 1e-9)
+    }
+}
+
 final class CaptionEditingTests: XCTestCase {
     func testNormalizeCollapsesWhitespace() {
         XCTAssertEqual(CaptionEditing.normalizeText("  hello   world \n"), "hello world")
