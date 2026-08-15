@@ -28,6 +28,10 @@ struct StyleOptions: Equatable {
         case vertical = "9:16"
         case square = "1:1"
         case classic = "4:3"
+        case portrait = "3:4"
+        case photo = "3:2"
+        case photoPortrait = "2:3"
+        case ultrawide = "21:9"
         var id: String { rawValue }
         var ratio: CGFloat? {
             switch self {
@@ -36,6 +40,10 @@ struct StyleOptions: Equatable {
             case .vertical: return 9.0 / 16.0
             case .square: return 1.0
             case .classic: return 4.0 / 3.0
+            case .portrait: return 3.0 / 4.0
+            case .photo: return 3.0 / 2.0
+            case .photoPortrait: return 2.0 / 3.0
+            case .ultrawide: return 21.0 / 9.0
             }
         }
     }

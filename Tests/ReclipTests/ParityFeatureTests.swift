@@ -231,6 +231,29 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testAspectPresetCount() {
+        XCTAssertEqual(StyleOptions.Aspect.allCases.count, 9, "8 ratio presets + Source")
+        // Every non-source preset yields a positive ratio; portrait ones are < 1.
+        for a in StyleOptions.Aspect.allCases where a != .source {
+            XCTAssertNotNil(a.ratio)
+            XCTAssertGreaterThan(a.ratio ?? 0, 0)
+        }
+        XCTAssertLessThan(StyleOptions.Aspect.portrait.ratio ?? 9, 1)
+        XCTAssertGreaterThan(StyleOptions.Aspect.ultrawide.ratio ?? 0, 2)
+    }
+
+    func testNewAspectPresetsExport() async throws {
+        let src = tmp("asp-src.mp4"); try await makeVideo(src, size: CGSize(width: 800, height: 500))
+        for a in [StyleOptions.Aspect.photo, .portrait, .ultrawide] {
+            var s = StyleOptions(); s.aspect = a
+            let out = tmp("asp-\(a.rawValue.replacingOccurrences(of: ":", with: "-")).mp4")
+            try await StyledExport.export(source: src, to: out, style: s)
+            let d = try await dims(out)
+            let expected = a.ratio!
+            XCTAssertEqual(d.width / d.height, expected, accuracy: 0.06, "\(a.rawValue) canvas ratio")
+        }
+    }
+
     func testTextAnnotationTypography() async throws {
         let src = tmp("type-src.mp4"); try await makeVideo(src)
         var a = Annotation(text: "Styled", start: 0.1, end: 1.0)
