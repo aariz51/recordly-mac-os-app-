@@ -206,6 +206,23 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testShadowProfilesDecreasePerLayer() {
+        let p = StyledExport.videoShadowProfiles
+        XCTAssertEqual(p.count, 3)                                    // Recordly's 3-layer video shadow
+        XCTAssertGreaterThan(p[0].blurScale, p[1].blurScale)         // wide base → tighter layers
+        XCTAssertGreaterThan(p[1].blurScale, p[2].blurScale)
+        XCTAssertGreaterThan(p[0].alphaScale, p[2].alphaScale)      // and progressively fainter
+        XCTAssertGreaterThan(p[0].offsetScale, p[2].offsetScale)
+    }
+
+    func testLayeredShadowExports() async throws {
+        let src = tmp("shadow-src.mp4"); try await makeVideo(src)
+        var s = StyleOptions(); s.shadowOpacity = 0.6; s.shadowRadius = 30
+        let out = tmp("shadow.mp4")
+        try await StyledExport.export(source: src, to: out, style: s)
+        try await assertValid(out)
+    }
+
     func testBitrateTiers() {
         XCTAssertEqual(ExportBitrate.base(width: 1280, height: 720), 10_000_000)
         XCTAssertEqual(ExportBitrate.base(width: 1920, height: 1080), 20_000_000)

@@ -514,13 +514,18 @@ enum StyledExport {
         // Rounded-corner mask over the positioned footage.
         let rounded = roundCorners(positioned, radius: corner)
 
-        // Soft drop shadow behind the footage card.
+        // Layered drop shadow behind the footage card (Recordly stacks three profiles
+        // — a wide soft base plus two tighter layers — for a more natural falloff than
+        // a single blur). Each layer's alpha/blur/offset scales the user's settings.
         var result = background
         if shadowOpacity > 0.001 {
-            if let shadow = makeShadow(for: rounded,
-                                       opacity: shadowOpacity,
-                                       radius: shadowRadius) {
-                result = shadow.composited(over: result)
+            for p in videoShadowProfiles {
+                if let layer = makeShadowLayer(for: rounded,
+                                               opacity: shadowOpacity * p.alphaScale,
+                                               blur: shadowRadius * p.blurScale,
+                                               offsetY: -shadowRadius * p.offsetScale) {
+                    result = layer.composited(over: result)
+                }
             }
         }
         return rounded.composited(over: result)
@@ -541,8 +546,19 @@ enum StyledExport {
         return blend.outputImage?.cropped(to: extent) ?? image
     }
 
-    private static func makeShadow(for image: CIImage, opacity: Double, radius: Double) -> CIImage? {
-        // Black silhouette from the footage alpha, blurred and offset slightly down.
+    /// One shadow layer: relative alpha/blur/offset scaling (Recordly's ShadowLayerProfile).
+    /// Ratios mirror `VIDEO_SHADOW_LAYER_PROFILES` (blur 48/16/8, offset = 0.25·blur),
+    /// re-expressed against the user's `shadowRadius` so the top layer spans ~2·radius.
+    struct ShadowLayerProfile { let offsetScale: CGFloat; let alphaScale: Double; let blurScale: CGFloat }
+    static let videoShadowProfiles: [ShadowLayerProfile] = [
+        ShadowLayerProfile(offsetScale: 0.50,  alphaScale: 0.7, blurScale: 2.00),
+        ShadowLayerProfile(offsetScale: 0.167, alphaScale: 0.5, blurScale: 0.66),
+        ShadowLayerProfile(offsetScale: 0.083, alphaScale: 0.3, blurScale: 0.33),
+    ]
+
+    private static func makeShadowLayer(for image: CIImage, opacity: Double,
+                                        blur: Double, offsetY: Double) -> CIImage? {
+        // Black silhouette from the footage alpha, blurred and offset down the canvas.
         let colorMatrix = CIFilter.colorMatrix()
         colorMatrix.inputImage = image
         colorMatrix.rVector = CIVector(x: 0, y: 0, z: 0, w: 0)
@@ -551,10 +567,10 @@ enum StyledExport {
         colorMatrix.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(opacity))
         guard let silhouette = colorMatrix.outputImage else { return nil }
 
-        let blur = CIFilter.gaussianBlur()
-        blur.inputImage = silhouette
-        blur.radius = Float(radius)
-        return blur.outputImage?.transformed(by: CGAffineTransform(translationX: 0, y: -radius * 0.4))
+        let blurFilter = CIFilter.gaussianBlur()
+        blurFilter.inputImage = silhouette
+        blurFilter.radius = Float(max(0, blur))
+        return blurFilter.outputImage?.transformed(by: CGAffineTransform(translationX: 0, y: CGFloat(offsetY)))
     }
 
     private static func makeBackground(_ background: StyleOptions.Background, size: CGSize) -> CIImage {
