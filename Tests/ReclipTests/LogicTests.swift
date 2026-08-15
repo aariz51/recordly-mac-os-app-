@@ -198,6 +198,60 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class MotionSmoothingTests: XCTestCase {
+    func testClampDeltaMs() {
+        XCTAssertEqual(MotionSmoothing.clampDeltaMs(30), 30, accuracy: 1e-9)
+        XCTAssertEqual(MotionSmoothing.clampDeltaMs(200), 80, accuracy: 1e-9)     // capped
+        XCTAssertEqual(MotionSmoothing.clampDeltaMs(0.5), 1, accuracy: 1e-9)      // floored
+        XCTAssertEqual(MotionSmoothing.clampDeltaMs(-5), 1000.0 / 60.0, accuracy: 1e-9) // fallback
+    }
+
+    func testSpringConvergesAndStaysBounded() {
+        let cfg = MotionSmoothing.cursorSpringConfig(smoothing: 0.3)
+        var s = SpringState()
+        _ = MotionSmoothing.stepSpring(&s, target: 0, deltaMs: 16, config: cfg)   // init at 0
+        var last = 0.0
+        for _ in 0..<800 {
+            last = MotionSmoothing.stepSpring(&s, target: 100, deltaMs: 16, config: cfg)
+            XCTAssertTrue(last.isFinite, "spring must never diverge to NaN/Inf")
+            XCTAssertGreaterThan(last, -50); XCTAssertLessThan(last, 200) // bounded, no runaway
+        }
+        XCTAssertEqual(last, 100, accuracy: 0.5, "spring settles at its target")
+    }
+
+    func testSpringFirstFrameSnaps() {
+        var s = SpringState(initialValue: 42)
+        let v = MotionSmoothing.stepSpring(&s, target: 7, deltaMs: 16,
+                                           config: MotionSmoothing.cursorSpringConfig(smoothing: 1.0))
+        XCTAssertEqual(v, 7, accuracy: 1e-9, "first step initializes to the target")
+        XCTAssertTrue(s.initialized)
+    }
+
+    func testMoreSmoothingIsFloatier() {
+        // Higher smoothing → lower stiffness (a slower, floatier settle).
+        XCTAssertGreaterThan(MotionSmoothing.cursorSpringConfig(smoothing: 0.1).stiffness,
+                             MotionSmoothing.cursorSpringConfig(smoothing: 1.5).stiffness)
+        XCTAssertEqual(MotionSmoothing.cursorSpringConfig(smoothing: 0).stiffness, 1000, accuracy: 1e-9)
+        XCTAssertEqual(MotionSmoothing.zoomSpringConfig(smoothness: 0).stiffness, 1000, accuracy: 1e-9)
+    }
+
+    func testCursorSway() {
+        // No sway or negligible motion → no rotation.
+        XCTAssertEqual(CursorSway.rotation(dx: 100, dy: 0, deltaMs: 16, sway: 0), 0, accuracy: 1e-12)
+        XCTAssertEqual(CursorSway.rotation(dx: 0.001, dy: 0, deltaMs: 16, sway: 1), 0, accuracy: 1e-12)
+        // Fast rightward motion → positive rotation; leftward → mirrored negative.
+        let right = CursorSway.rotation(dx: 200, dy: 0, deltaMs: 16, sway: 1)
+        let left = CursorSway.rotation(dx: -200, dy: 0, deltaMs: 16, sway: 1)
+        XCTAssertGreaterThan(right, 0)
+        XCTAssertEqual(right, -left, accuracy: 1e-9)
+        // Bounded by maxRotation·sway·intensityScale.
+        let bound = CursorSway.maxRotation * 1 * CursorSway.intensityScale
+        XCTAssertLessThanOrEqual(abs(right), bound + 1e-9)
+        // Slider mapping round-trips.
+        XCTAssertEqual(CursorSway.fromSliderValue(CursorSway.toSliderValue(1.4)), 1.4, accuracy: 1e-9)
+    }
+}
+
 final class MediaTimingTests: XCTestCase {
     func testClampMediaTime() {
         XCTAssertEqual(MediaTiming.clampMediaTime(5, duration: 10), 5, accuracy: 1e-9)
