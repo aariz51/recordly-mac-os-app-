@@ -198,6 +198,38 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class CursorClickEffectTests: XCTestCase {
+    func testBounceDurationClamped() {
+        XCTAssertEqual(CursorClickEffect.clampBounceDuration(30), 60, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.clampBounceDuration(600), 500, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.clampBounceDuration(200), 200, accuracy: 1e-9)
+    }
+
+    func testBounceProgressDecays() {
+        XCTAssertEqual(CursorClickEffect.bounceProgress(ageMs: 0, bounceDurationMs: 300), 1, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.bounceProgress(ageMs: 150, bounceDurationMs: 300), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.bounceProgress(ageMs: 300, bounceDurationMs: 300), 0, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.bounceProgress(ageMs: 400, bounceDurationMs: 300), 0, accuracy: 1e-9)
+    }
+
+    func testBounceScaleDipsAndFloors() {
+        // Progress 0 or 1 → no dip (scale 1); peak dip at progress 0.5.
+        XCTAssertEqual(CursorClickEffect.bounceScale(progress: 0, clickBounce: 1), 1, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.bounceScale(progress: 1, clickBounce: 1), 1, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.bounceScale(progress: 0.5, clickBounce: 1), 0.92, accuracy: 1e-9)
+        // A large clickBounce is floored at 0.72.
+        XCTAssertEqual(CursorClickEffect.bounceScale(progress: 0.5, clickBounce: 100), 0.72, accuracy: 1e-9)
+    }
+
+    func testRippleDelayedThenFades() {
+        // Delay = half the bounce duration (150ms here); ripple starts then.
+        XCTAssertEqual(CursorClickEffect.rippleProgress(ageMs: 100, bounceDurationMs: 300, effectDurationMs: 400), 0, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.rippleProgress(ageMs: 150, bounceDurationMs: 300, effectDurationMs: 400), 1, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.rippleProgress(ageMs: 350, bounceDurationMs: 300, effectDurationMs: 400), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(CursorClickEffect.rippleProgress(ageMs: 550, bounceDurationMs: 300, effectDurationMs: 400), 0, accuracy: 1e-9)
+    }
+}
+
 final class MotionSmoothingTests: XCTestCase {
     func testClampDeltaMs() {
         XCTAssertEqual(MotionSmoothing.clampDeltaMs(30), 30, accuracy: 1e-9)
