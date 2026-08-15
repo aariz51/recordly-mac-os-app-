@@ -149,4 +149,17 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertLessThanOrEqual(w, 720, "720p preset caps width, got \(w)")
         XCTAssertGreaterThan(w, 100)
     }
+
+    func testCursorOverlayExports() async throws {
+        let src = tmp("cur-src.mp4"); try await makeVideo(src)
+        var track = CursorTrack()
+        for i in 0..<40 { track.samples.append(CursorSample(t: Double(i) / 30.0, x: Double(i) / 40.0, y: 0.5)) }
+        for kind in CursorStyle.Kind.allCases {
+            var cs = CursorStyle(); cs.enabled = true; cs.kind = kind; cs.size = 1.5
+            let out = tmp("cur-\(kind.rawValue).mp4")
+            try await StyledExport.export(source: src, to: out, style: StyleOptions(),
+                                          cursor: track, cursorStyle: cs)
+            try await assertValid(out)
+        }
+    }
 }

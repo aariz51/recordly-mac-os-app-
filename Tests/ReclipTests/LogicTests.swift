@@ -99,6 +99,18 @@ final class CursorTrackTests: XCTestCase {
     func testEmptyTrackReturnsNil() {
         XCTAssertNil(CursorTrack().position(at: 1.0))
     }
+
+    func testInterpolatedPosition() {
+        var t = CursorTrack()
+        t.samples = [CursorSample(t: 0, x: 0, y: 0), CursorSample(t: 2, x: 1, y: 0.5)]
+        let mid = t.interpolated(at: 1.0)   // halfway → (0.5, 0.25)
+        XCTAssertEqual(mid?.x ?? -1, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(mid?.y ?? -1, 0.25, accuracy: 1e-9)
+        // clamps outside the range
+        XCTAssertEqual(t.interpolated(at: -1)?.x ?? -1, 0, accuracy: 1e-9)
+        XCTAssertEqual(t.interpolated(at: 9)?.x ?? -1, 1, accuracy: 1e-9)
+        XCTAssertNil(CursorTrack().interpolated(at: 1))
+    }
 }
 
 final class TimeMapTests: XCTestCase {

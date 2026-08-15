@@ -105,7 +105,9 @@ enum StyledExport {
                              webcamSettings: WebcamSettings = WebcamSettings(),
                              annotations: [Annotation] = [],
                              trim: CMTimeRange? = nil,
-                             speed: Double = 1.0) async throws -> StyledTimeline {
+                             speed: Double = 1.0,
+                             cursor: CursorTrack? = nil,
+                             cursorStyle: CursorStyle = CursorStyle()) async throws -> StyledTimeline {
         let srcAsset = AVURLAsset(url: source)
         guard let vTrack = try await srcAsset.loadTracks(withMediaType: .video).first else {
             throw StyledExportError.noVideoTrack
@@ -158,7 +160,10 @@ enum StyledExport {
 
         let video = AVMutableVideoComposition(asset: comp) { request in
             let srcT = trimStart + request.compositionTime.seconds * clampedSpeed
-            let frame = applyCrop(request.sourceImage, crop)
+            // Draw the stylized cursor in source space first, so crop/zoom carry it.
+            let withCursor = CursorRenderer.draw(on: request.sourceImage, track: cursor,
+                                                 time: srcT, style: cursorStyle)
+            let frame = applyCrop(withCursor, crop)
             // Background is either the static solid/gradient, or a blurred fill of the frame.
             let background = blur > 0.01
                 ? blurredFill(frame, canvas: canvas, intensity: CGFloat(blur))
@@ -242,10 +247,13 @@ enum StyledExport {
                        annotations: [Annotation] = [],
                        speed: Double = 1.0,
                        quality: ExportQuality = .high,
+                       cursor: CursorTrack? = nil,
+                       cursorStyle: CursorStyle = CursorStyle(),
                        progress: (@Sendable (Double) -> Void)? = nil) async throws {
         let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
                                         webcam: webcam, webcamSettings: webcamSettings,
-                                        annotations: annotations, trim: trim, speed: speed)
+                                        annotations: annotations, trim: trim, speed: speed,
+                                        cursor: cursor, cursorStyle: cursorStyle)
         guard let export = AVAssetExportSession(asset: tl.asset, presetName: quality.preset) else {
             throw StyledExportError.exportSessionFailed("could not create export session")
         }

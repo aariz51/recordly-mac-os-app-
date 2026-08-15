@@ -35,6 +35,20 @@ struct CursorTrack: Codable {
         for s in samples where s.t <= t { best = s }
         return CGPoint(x: best.x, y: best.y)
     }
+
+    /// Smoothly interpolated position at time `t` (linear between bracketing samples).
+    func interpolated(at t: Double) -> CGPoint? {
+        guard let first = samples.first, let last = samples.last else { return nil }
+        if t <= first.t { return CGPoint(x: first.x, y: first.y) }
+        if t >= last.t { return CGPoint(x: last.x, y: last.y) }
+        for i in 1..<samples.count where samples[i].t >= t {
+            let a = samples[i - 1], b = samples[i]
+            let span = b.t - a.t
+            let f = span > 1e-9 ? (t - a.t) / span : 0
+            return CGPoint(x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f)
+        }
+        return CGPoint(x: last.x, y: last.y)
+    }
 }
 
 /// Samples the global cursor position on a timer while a recording is in progress.
