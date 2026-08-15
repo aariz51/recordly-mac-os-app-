@@ -101,9 +101,11 @@ sway, loop mode, motion presets. **Visual look needs your review** (can't verify
 | **Aspect ratio presets (8 + custom)** | 🟡 | 5 presets (batch 2) |
 | **Advanced per-side / vertical padding** | ❌ | — |
 
-## 7. Auto-captions  ❌ (entire subsystem missing)
-Recordly: local Whisper transcription, model download/management, 10 languages, full
-caption styling, inline editing, karaoke renderer, SRT/VTT export. **Reclip has none.**
+## 7. Auto-captions  🟡 (rendering half landed)
+Reclip now renders styled burned-in caption pills (color/size/offset/width/box) from cues
+and exports **SRT + VTT** sidecars (CaptionRenderer + CaptionExport). Still missing:
+**Whisper transcription** (needs native ML + real audio), model management, 10 languages,
+inline editing, karaoke word-highlighting.
 
 ## 8. Export
 | Feature | Reclip | Note |
