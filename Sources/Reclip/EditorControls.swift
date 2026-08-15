@@ -107,10 +107,10 @@ struct TrimBar: View {
 
             ZStack(alignment: .leading) {
                 RoundedRectangle(cornerRadius: Radius.track, style: .continuous)
-                    .fill(Color.primary.opacity(0.07))
+                    .fill(Color.primary.opacity(0.09))
 
                 RoundedRectangle(cornerRadius: Radius.track, style: .continuous)
-                    .fill(Palette.accent.opacity(grabbed == nil ? 0.18 : 0.26))
+                    .fill(Palette.accent.opacity(grabbed == nil ? 0.22 : 0.30))
                     .frame(width: max(endX - startX + handleWidth, handleWidth * 2))
                     .offset(x: startX)
                     .animation(Motion.hover, value: grabbed)

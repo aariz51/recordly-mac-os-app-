@@ -241,7 +241,8 @@ struct EditorView: View {
                           ? "Needs cursor data — record in Reclip to enable."
                           : "Eases into wherever the cursor is working.",
                       isOn: $autoZoom,
-                      enabled: cursorTrack != nil) {
+                      enabled: cursorTrack != nil,
+                      emphasis: .control) {
                 updateZoom()
                 Task { await rebuild() }
             }
@@ -275,7 +276,8 @@ struct EditorView: View {
             ToggleRow(title: "Webcam bubble",
                       subtitle: webcamFrames.isEmpty ? "No webcam footage for this clip." : nil,
                       isOn: $webcam.enabled,
-                      enabled: !webcamFrames.isEmpty) {
+                      enabled: !webcamFrames.isEmpty,
+                      emphasis: .control) {
                 Task { await rebuild() }
             }
 

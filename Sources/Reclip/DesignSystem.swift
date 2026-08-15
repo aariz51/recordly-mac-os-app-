@@ -132,6 +132,14 @@ extension View {
             .textCase(.uppercase)
     }
 
+    /// The label on a single control *inside* a section. It has to be visibly a
+    /// rung below the eyebrow, or "Padding" reads as a peer of "Frame" and the
+    /// grouping stops meaning anything — so it stays sentence case, unspaced.
+    func controlLabelType() -> some View {
+        font(.system(size: 11.5, weight: .medium))
+            .tracking(0)
+    }
+
     func captionType() -> some View {
         font(.system(size: 11))
             .tracking(0.1)
@@ -378,11 +386,17 @@ struct ProgressTrack: View {
 // a mapping failure — so the whole row is the target, and it presses like one.
 
 struct ToggleRow: View {
+    /// A switch in a list of capture options is a list item; a switch sitting
+    /// among inspector sliders is a control. Same component, two densities —
+    /// so its label matches whatever it is standing next to.
+    enum Emphasis { case list, control }
+
     var icon: String?
     let title: String
     var subtitle: String?
     @Binding var isOn: Bool
     var enabled: Bool = true
+    var emphasis: Emphasis = .list
     var onChange: () -> Void = {}
 
     @State private var hovering = false
@@ -404,7 +418,13 @@ struct ToggleRow: View {
                 }
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title).titleType()
+                    Group {
+                        if emphasis == .list {
+                            Text(title).titleType()
+                        } else {
+                            Text(title).controlLabelType()
+                        }
+                    }
                     if let subtitle {
                         Text(subtitle)
                             .captionType()
@@ -502,6 +522,28 @@ struct SectionHeader: View {
 // The value is always visible. Showing what a control is set to is context that
 // makes the control simpler, not busier.
 
+/// The label/value pair above a single control. One rung below `SectionHeader`.
+struct ControlLabel: View {
+    let title: String
+    var value: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .controlLabelType()
+                .foregroundStyle(.primary)
+            Spacer(minLength: Space.s)
+            if let value {
+                Text(value)
+                    .captionType()
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+            }
+        }
+    }
+}
+
 struct ValueSlider: View {
     let title: String
     @Binding var value: Double
@@ -511,7 +553,7 @@ struct ValueSlider: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            SectionHeader(title: title, trailing: format(value))
+            ControlLabel(title: title, value: format(value))
             Slider(value: $value, in: range) { editing in
                 if !editing { onCommit() }
             }
