@@ -35,7 +35,7 @@ struct BackgroundSwatch: View {
                     .frame(height: 38)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.18), lineWidth: 1))
+                            .strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .strokeBorder(Palette.accent, lineWidth: 2)
@@ -114,6 +114,10 @@ struct TrimBar: View {
                     .offset(x: endX)
                     .gesture(dragGesture(usable: usable, span: span, isStart: false))
             }
+            // The handles move as they're dragged, so translation has to be
+            // measured against the track — not against the handle's own frame,
+            // which would feed its motion back into the gesture.
+            .coordinateSpace(.named(Self.track))
         }
         .frame(height: 34)
     }
@@ -132,8 +136,10 @@ struct TrimBar: View {
 
     /// `minimumDistance: 0` so the handle answers on pointer-down, and the value
     /// is offset from where it was grabbed rather than snapping under the pointer.
+    private static let track = "reclip.trim.track"
+
     private func dragGesture(usable: CGFloat, span: Double, isStart: Bool) -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.track))
             .onChanged { value in
                 let delta = Double(value.translation.width / usable) * span
                 if isStart {
@@ -230,7 +236,7 @@ struct CornerPicker: View {
                 .fill(Color.primary.opacity(0.06))
                 .overlay(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
 
             dot(.topLeading, alignment: .topLeading)
             dot(.topTrailing, alignment: .topTrailing)

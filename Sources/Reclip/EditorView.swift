@@ -1,10 +1,13 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+import Combine
 
 struct EditorView: View {
     let sourceURL: URL
     var onClose: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduce
 
     @State private var style = StyleOptions()
     @State private var zoom = ZoomTimeline()
@@ -20,10 +23,21 @@ struct EditorView: View {
     @State private var newCaption = ""
     @State private var speed: Double = 1.0
     @State private var player = AVPlayer()
-    @State private var playerItem: AVPlayerItem?
     @State private var isExporting = false
-    @State private var status = ""
+    @State private var status: Status?
     @State private var exportedURL: URL?
+    @State private var playhead: Double = 0
+    @State private var timeObserver: Any?
+    @State private var didLoad = false
+    /// Aspect of the rendered composition, so the preview card hugs the video
+    /// instead of framing it in black letterbox bars.
+    @State private var previewAspect: CGFloat = 16.0 / 9.0
+
+    struct Status: Equatable {
+        let kind: FeedbackKind
+        let message: String
+        init(_ kind: FeedbackKind, _ message: String) { self.kind = kind; self.message = message }
+    }
 
     private let presets: [(String, StyleOptions.Background)] = [
         ("Indigo", .gradient(topRGB: (0.39, 0.36, 1.0), bottomRGB: (0.66, 0.33, 0.97))),
@@ -35,137 +49,315 @@ struct EditorView: View {
     @State private var presetIndex = 0
 
     var body: some View {
-        HSplitView {
-            VideoPlayer(player: player)
-                .frame(minWidth: 420, minHeight: 320)
-                .background(Color.black)
-
-            controls
-                .frame(width: 280)
-                .padding(18)
+        HStack(spacing: 0) {
+            stage
+            inspector
+                .frame(width: 320)
         }
-        .frame(minWidth: 760, minHeight: 460)
-        .task { await rebuild() }
+        .frame(minWidth: 940, idealWidth: 1060, minHeight: 620, idealHeight: 680)
+        .task { await firstLoad() }
+        .onDisappear {
+            if let timeObserver { player.removeTimeObserver(timeObserver) }
+            player.pause()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { _ in
+            // A polish preview is watched over and over; loop it instead of
+            // leaving a frozen last frame.
+            Task { @MainActor in
+                await player.seek(to: .zero)
+                player.play()
+            }
+        }
     }
 
-    private var controls: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Polish").font(.title2.bold())
+    // MARK: - Stage
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Background").font(.headline)
-                Picker("", selection: $presetIndex) {
-                    ForEach(presets.indices, id: \.self) { Text(presets[$0].0).tag($0) }
+    private var stage: some View {
+        ZStack {
+            Palette.stage.ignoresSafeArea()
+
+            PlayerStage(player: player)
+                .aspectRatio(previewAspect, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
+                .padding(Space.xxl)
+
+            if !didLoad {
+                VStack(spacing: Space.m) {
+                    ProgressView().controlSize(.small)
+                    Text("Building preview…")
+                        .captionType()
+                        .foregroundStyle(.secondary)
                 }
-                .labelsHidden()
-                .onChange(of: presetIndex) {
-                    style.background = presets[presetIndex].1
-                    Task { await rebuild() }
-                }
+                .transition(.opacity)
             }
-
-            slider("Padding", value: $style.paddingFraction, range: 0...0.16)
-            slider("Corner radius", value: $style.cornerRadiusFraction, range: 0...0.06)
-            slider("Shadow", value: $style.shadowOpacity, range: 0...0.7)
-
-            Toggle("Auto-zoom (follow cursor)", isOn: $autoZoom)
-                .disabled(cursorTrack == nil)
-                .onChange(of: autoZoom) { updateZoom(); Task { await rebuild() } }
-            if cursorTrack == nil {
-                Text("No cursor data for this clip (record in Reclip to enable auto-zoom).")
-                    .font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Top-trailing, because the window's traffic lights sit over the
+        // top-leading corner of the stage.
+        .overlay(alignment: .topTrailing) {
+            HStack(spacing: 6) {
+                Image(systemName: "eye")
+                Text("Live preview")
             }
+            .captionType()
+            .foregroundStyle(.white.opacity(0.75))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial, in: Capsule())
+            .padding(Space.l)
+        }
+        .animation(Motion.enter(reduce), value: didLoad)
+    }
 
-            if duration > 0 {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Trim  \(timeLabel(trimStart)) – \(timeLabel(trimEnd))").font(.headline)
-                    Slider(value: $trimStart, in: 0...max(trimEnd - 0.2, 0.2)) { e in if !e { Task { await rebuild() } } }
-                    Slider(value: $trimEnd, in: min(trimStart + 0.2, duration)...duration) { e in if !e { Task { await rebuild() } } }
+    // MARK: - Inspector
+
+    private var inspector: some View {
+        VStack(spacing: 0) {
+            inspectorHeader
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.xl) {
+                    backgroundSection
+                    frameSection
+                    motionSection
+                    if duration > 0 { timingSection }
+                    webcamSection
+                    captionSection
                 }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(String(format: "Speed  %.2f×", speed)).font(.headline)
-                    Slider(value: $speed, in: 0.25...4.0) { e in if !e { Task { await rebuild() } } }
-                }
+                .padding(.horizontal, Space.l)
+                .padding(.top, Space.l)
+                .padding(.bottom, Space.xl)
             }
+            .scrollEdge(.bottom, color: Color(nsColor: .windowBackgroundColor).opacity(0.9), height: 16)
 
-            Toggle("Webcam bubble", isOn: $webcam.enabled)
-                .disabled(webcamFrames.isEmpty)
-                .onChange(of: webcam.enabled) { Task { await rebuild() } }
-            if !webcamFrames.isEmpty && webcam.enabled {
-                Picker("Position", selection: $webcam.corner) {
-                    ForEach(WebcamSettings.Corner.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .onChange(of: webcam.corner) { Task { await rebuild() } }
-                slider("Webcam size", value: $webcam.sizeFraction, range: 0.12...0.35)
-            } else if webcamFrames.isEmpty {
-                Text("No webcam footage for this clip.")
-                    .font(.caption2).foregroundStyle(.secondary)
+            exportBar
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Color.primary.opacity(0.10)).frame(width: 1)
+        }
+    }
+
+    private var inspectorHeader: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Polish").displayType()
+                Text(sourceURL.lastPathComponent)
+                    .captionType()
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+            Spacer(minLength: Space.s)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .bold))
+            }
+            .buttonStyle(ActionButtonStyle(variant: .quiet, fullWidth: false))
+            .keyboardShortcut("w", modifiers: .command)
+            .help("Close editor (⌘W)")
+        }
+        .padding(.horizontal, Space.l)
+        .padding(.top, Space.l)
+        .padding(.bottom, Space.m)
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Captions").font(.headline)
-                HStack {
-                    TextField("Caption text", text: $newCaption)
-                        .textFieldStyle(.roundedBorder)
-                    Button("Add") { addCaption() }
-                        .disabled(newCaption.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                ForEach(annotations) { a in
-                    HStack {
-                        Text("\(timeLabel(a.start))  \(a.text)").font(.caption).lineLimit(1)
-                        Spacer()
-                        Button {
-                            annotations.removeAll { $0.id == a.id }
-                            Task { await rebuild() }
-                        } label: { Image(systemName: "trash") }
-                            .buttonStyle(.borderless)
+    // MARK: - Sections
+
+    private var backgroundSection: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            SectionHeader(title: "Background")
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s), count: 3),
+                      spacing: Space.s) {
+                ForEach(presets.indices, id: \.self) { i in
+                    BackgroundSwatch(name: presets[i].0,
+                                     background: presets[i].1,
+                                     isSelected: presetIndex == i) {
+                        presetIndex = i
+                        style.background = presets[i].1
+                        Task { await rebuild() }
                     }
                 }
             }
-
-            Divider()
-
-            Button {
-                Task { await export() }
-            } label: {
-                Label(isExporting ? "Exporting…" : "Export styled MP4", systemImage: "square.and.arrow.up")
-                    .frame(maxWidth: .infinity)
-            }
-            .controlSize(.large)
-            .buttonStyle(.borderedProminent)
-            .tint(.pink)
-            .disabled(isExporting)
-
-            Button {
-                Task { await export(asGif: true) }
-            } label: {
-                Label("Export GIF", systemImage: "photo.stack")
-                    .frame(maxWidth: .infinity)
-            }
-            .disabled(isExporting)
-
-            if !status.isEmpty {
-                Text(status).font(.caption).foregroundStyle(.secondary)
-            }
-            if let exportedURL {
-                Button {
-                    NSWorkspace.shared.activateFileViewerSelecting([exportedURL])
-                } label: { Label("Reveal in Finder", systemImage: "folder") }
-                .buttonStyle(.link)
-            }
-
-            Spacer()
-            Button("Close", action: onClose)
         }
     }
 
-    private func slider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.headline)
-            Slider(value: value, in: range) { editing in
-                if !editing { Task { await rebuild() } }
+    private var frameSection: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            SectionHeader(title: "Frame")
+
+            ValueSlider(title: "Padding", value: $style.paddingFraction, range: 0...0.16,
+                        format: { String(format: "%.0f%%", $0 * 100) },
+                        onCommit: { Task { await rebuild() } })
+
+            ValueSlider(title: "Corner radius", value: $style.cornerRadiusFraction, range: 0...0.06,
+                        format: { String(format: "%.1f%%", $0 * 100) },
+                        onCommit: { Task { await rebuild() } })
+
+            ValueSlider(title: "Shadow", value: $style.shadowOpacity, range: 0...0.7,
+                        format: { String(format: "%.0f%%", $0 / 0.7 * 100) },
+                        onCommit: { Task { await rebuild() } })
+        }
+    }
+
+    private var motionSection: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            SectionHeader(title: "Motion")
+            InspectorToggle(title: "Auto-zoom",
+                            subtitle: cursorTrack == nil
+                                ? "Needs cursor data — record in Reclip to enable."
+                                : "Eases into wherever the cursor is working.",
+                            isOn: $autoZoom,
+                            enabled: cursorTrack != nil) {
+                updateZoom()
+                Task { await rebuild() }
             }
         }
+    }
+
+    private var timingSection: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: Space.s) {
+                SectionHeader(title: "Trim",
+                              trailing: "\(timeLabel(trimStart)) – \(timeLabel(trimEnd))")
+                TrimBar(duration: duration,
+                        start: $trimStart,
+                        end: $trimEnd,
+                        playhead: playhead) {
+                    Task { await rebuild() }
+                }
+                Text("\(timeLabel(trimEnd - trimStart)) kept of \(timeLabel(duration))")
+                    .captionType()
+                    .foregroundStyle(.secondary)
+            }
+
+            SpeedControl(speed: $speed) { Task { await rebuild() } }
+        }
+    }
+
+    private var webcamSection: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            SectionHeader(title: "Webcam")
+            InspectorToggle(title: "Webcam bubble",
+                            subtitle: webcamFrames.isEmpty ? "No webcam footage for this clip." : nil,
+                            isOn: $webcam.enabled,
+                            enabled: !webcamFrames.isEmpty) {
+                Task { await rebuild() }
+            }
+
+            if !webcamFrames.isEmpty && webcam.enabled {
+                VStack(alignment: .leading, spacing: Space.m) {
+                    HStack(alignment: .center, spacing: Space.m) {
+                        CornerPicker(corner: $webcam.corner) { Task { await rebuild() } }
+                        Text(webcam.corner.rawValue)
+                            .captionType()
+                            .foregroundStyle(.secondary)
+                        Spacer(minLength: 0)
+                    }
+
+                    ValueSlider(title: "Size", value: $webcam.sizeFraction, range: 0.12...0.35,
+                                format: { String(format: "%.0f%%", $0 * 100) },
+                                onCommit: { Task { await rebuild() } })
+                }
+                .transition(.rise(reduce, distance: 6))
+            }
+        }
+        .animation(Motion.move(reduce), value: webcam.enabled)
+    }
+
+    private var captionSection: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            SectionHeader(title: "Captions",
+                          trailing: annotations.isEmpty ? nil : "\(annotations.count)")
+
+            HStack(spacing: Space.s) {
+                TextField("Caption at \(timeLabel(playhead))", text: $newCaption)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(addCaption)
+                Button("Add", action: addCaption)
+                    .buttonStyle(ActionButtonStyle(variant: .secondary, fullWidth: false))
+                    .disabled(newCaption.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            VStack(spacing: Space.xs) {
+                ForEach(annotations) { a in
+                    HStack(spacing: Space.s) {
+                        Text(timeLabel(a.start))
+                            .captionType()
+                            .monospacedDigit()
+                            .foregroundStyle(Palette.accent)
+                        Text(a.text)
+                            .captionType()
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        Button {
+                            withAnimation(Motion.enter(reduce)) {
+                                annotations.removeAll { $0.id == a.id }
+                            }
+                            Task { await rebuild() }
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .buttonStyle(ActionButtonStyle(variant: .quiet, fullWidth: false))
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, Space.s)
+                    .background(Color.primary.opacity(0.05),
+                                in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .transition(.row(reduce))
+                }
+            }
+        }
+    }
+
+    // MARK: - Export bar
+
+    private var exportBar: some View {
+        VStack(spacing: Space.s) {
+            if let status {
+                FeedbackLine(kind: status.kind, message: status.message)
+                    .transition(.rise(reduce, distance: 4))
+            }
+
+            Button { Task { await export() } } label: {
+                if isExporting {
+                    HStack(spacing: 6) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.white)
+                        Text("Rendering…")
+                    }
+                } else {
+                    Label("Export MP4", systemImage: "square.and.arrow.up")
+                }
+            }
+            .buttonStyle(ActionButtonStyle(variant: .prominent))
+            .disabled(isExporting)
+            .keyboardShortcut("e", modifiers: .command)
+
+            HStack(spacing: Space.s) {
+                Button { Task { await export(asGif: true) } } label: {
+                    Label("GIF", systemImage: "photo.stack")
+                }
+                .buttonStyle(ActionButtonStyle(variant: .secondary))
+                .disabled(isExporting)
+
+                if let exportedURL {
+                    Button { NSWorkspace.shared.activateFileViewerSelecting([exportedURL]) } label: {
+                        Label("Reveal", systemImage: "folder")
+                    }
+                    .buttonStyle(ActionButtonStyle(variant: .secondary))
+                    .transition(.rise(reduce, distance: 4))
+                }
+            }
+        }
+        .padding(Space.l)
+        .background(.regularMaterial)
+        .animation(Motion.enter(reduce), value: isExporting)
+        .animation(Motion.enter(reduce), value: status)
+        .animation(Motion.enter(reduce), value: exportedURL)
     }
 
     // MARK: - Composition
@@ -178,31 +370,60 @@ struct EditorView: View {
         zoom = ZoomTimeline.autoZoom(from: track, duration: duration)
     }
 
+    private func firstLoad() async {
+        cursorTrack = CursorTrack.load(besides: sourceURL)
+        if !webcamLoaded {
+            webcamFrames = await WebcamOverlay.load(for: sourceURL)
+            webcamLoaded = true
+        }
+        if duration == 0 {
+            let asset = AVURLAsset(url: sourceURL)
+            duration = (try? await asset.load(.duration))?.seconds ?? 0
+            if trimEnd == 0 { trimEnd = duration }
+        }
+        observePlayhead()
+        await rebuild()
+        didLoad = true
+    }
+
+    /// Playback position, mapped back into source time so the trim bar's
+    /// playhead stays truthful under trim and speed changes.
+    private func observePlayhead() {
+        guard timeObserver == nil else { return }
+        timeObserver = player.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.08, preferredTimescale: 600),
+            queue: .main
+        ) { time in
+            let out = time.seconds
+            guard out.isFinite else { return }
+            playhead = trimStart + out * speed
+        }
+    }
+
     private func rebuild() async {
-        let asset = AVURLAsset(url: sourceURL)
+        // Keep the viewer where they were: rebuilding the composition should not
+        // throw playback back to the first frame every time a slider is nudged.
+        let wasPlaying = player.rate > 0 || !didLoad
+        let resumeAt = player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0
+
         do {
-            if cursorTrack == nil { cursorTrack = CursorTrack.load(besides: sourceURL) }
-            if !webcamLoaded {
-                webcamFrames = await WebcamOverlay.load(for: sourceURL)
-                webcamLoaded = true
-            }
-            if duration == 0 {
-                duration = (try? await asset.load(.duration))?.seconds ?? 0
-                if trimEnd == 0 { trimEnd = duration }
-            }
             updateZoom()
             let tl = try await StyledExport.makeTimeline(
                 source: sourceURL, style: style, zoom: zoom, webcam: webcamFrames, webcamSettings: webcam,
                 annotations: annotations, trim: currentTrim(), speed: speed)
+            let size = tl.video.renderSize
+            if size.width > 0, size.height > 0 { previewAspect = size.width / size.height }
             let item = AVPlayerItem(asset: tl.asset)
             item.videoComposition = tl.video
-            playerItem = item
             player.replaceCurrentItem(with: item)
-            _ = await player.seek(to: .zero)
-            player.play()
-            status = ""
+
+            let target = min(max(resumeAt, 0), max(tl.duration - 0.05, 0))
+            await player.seek(to: CMTime(seconds: target, preferredTimescale: 600),
+                              toleranceBefore: .zero, toleranceAfter: .zero)
+            if wasPlaying { player.play() }
+            if status?.kind == .error { status = nil }
         } catch {
-            status = "Preview error: \(error.localizedDescription)"
+            status = Status(.error, "Preview error: \(error.localizedDescription)")
         }
     }
 
@@ -214,24 +435,28 @@ struct EditorView: View {
     }
 
     private func addCaption() {
+        let text = newCaption.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
         // Player time is OUTPUT time; convert to SOURCE time so captions stay in sync with trim/speed.
         let outNow = player.currentTime().seconds
         let out = outNow.isFinite ? outNow : 0
         let srcStart = trimStart + out * speed
-        annotations.append(Annotation(text: newCaption.trimmingCharacters(in: .whitespaces),
-                                      start: srcStart, end: srcStart + 3))
+        withAnimation(Motion.enter(reduce)) {
+            annotations.append(Annotation(text: text, start: srcStart, end: srcStart + 3))
+        }
         newCaption = ""
         Task { await rebuild() }
     }
 
     private func timeLabel(_ t: Double) -> String {
-        let s = Int(t.rounded())
+        let s = Int(max(t, 0).rounded())
         return String(format: "%d:%02d", s / 60, s % 60)
     }
 
     private func export(asGif: Bool = false) async {
         isExporting = true
-        status = asGif ? "Rendering GIF…" : "Rendering MP4…"
+        exportedURL = nil
+        status = Status(.status, asGif ? "Rendering GIF…" : "Rendering MP4…")
         let out = sourceURL.deletingPathExtension()
             .appendingPathExtension(asGif ? "styled.gif" : "styled.mp4")
         let trim = currentTrim()
@@ -246,9 +471,9 @@ struct EditorView: View {
                                               annotations: annotations, speed: speed)
             }
             exportedURL = out
-            status = "Saved \(out.lastPathComponent)"
+            status = Status(.success, "Saved \(out.lastPathComponent)")
         } catch {
-            status = "Export failed: \(error.localizedDescription)"
+            status = Status(.error, "Export failed: \(error.localizedDescription)")
         }
         isExporting = false
     }

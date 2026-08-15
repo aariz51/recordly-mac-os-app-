@@ -22,19 +22,9 @@ enum Motion {
         reduce ? .easeOut(duration: 0.15) : .timingCurve(0.77, 0, 0.175, 1, duration: 0.24)
     }
 
-    /// Panels and drawers — the iOS drawer curve.
-    static func drawer(_ reduce: Bool) -> Animation {
-        reduce ? .easeOut(duration: 0.2) : .timingCurve(0.32, 0.72, 0, 1, duration: 0.28)
-    }
-
     /// Apple's reposition spring: damping 1.0, response 0.4. No overshoot.
     static func settle(_ reduce: Bool) -> Animation {
         reduce ? .easeOut(duration: 0.15) : .spring(duration: 0.4, bounce: 0)
-    }
-
-    /// Momentum spring: damping ~0.8. Only after the gesture itself carried velocity.
-    static func momentum(_ reduce: Bool) -> Animation {
-        reduce ? .easeOut(duration: 0.15) : .spring(duration: 0.4, bounce: 0.2)
     }
 }
 
@@ -86,7 +76,6 @@ enum Space {
 enum Radius {
     static let control: CGFloat = 8
     static let card: CGFloat = 14
-    static let panel: CGFloat = 18
 }
 
 // MARK: - Typography
@@ -103,10 +92,6 @@ extension View {
     func titleType() -> some View {
         font(.system(size: 15, weight: .semibold))
             .tracking(-0.1)
-    }
-
-    func bodyType() -> some View {
-        font(.system(size: 13))
     }
 
     /// Section eyebrow — small, so it gets positive tracking.
@@ -139,7 +124,7 @@ struct CardSurface: ViewModifier {
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
-                        LinearGradient(colors: [Color.white.opacity(0.16), Color.white.opacity(0.03)],
+                        LinearGradient(colors: [Color.primary.opacity(0.14), Color.primary.opacity(0.04)],
                                        startPoint: .top, endPoint: .bottom),
                         lineWidth: 1))
     }
@@ -226,7 +211,7 @@ struct ActionButtonStyle: ButtonStyle {
         @ViewBuilder private var border: some View {
             if variant == .secondary {
                 RoundedRectangle(cornerRadius: Radius.control, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 1)
             }
         }
 

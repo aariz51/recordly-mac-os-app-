@@ -18,12 +18,10 @@ struct ContentView: View {
     @State private var windows: [SCWindow] = []
     @State private var selectedDisplayID: CGDirectDisplayID?
     @State private var selectedWindowID: CGWindowID?
-    @State private var feedback = Feedback(.status, "Pick what to capture, then hit record.")
+    @State private var feedback = Feedback(.status, "Pick what to capture, then press ⌘R.")
     @State private var lastSavedURL: URL?
-    @State private var editing: EditItem?
     @State private var appeared = false
 
-    struct EditItem: Identifiable { let url: URL; var id: String { url.path } }
     struct Feedback: Equatable {
         let kind: FeedbackKind
         let message: String
@@ -71,9 +69,6 @@ struct ContentView: View {
             withAnimation(Motion.enter(reduce)) { appeared = true }
         }
         .onChange(of: sourceKind) { Task { await refreshSources() } }
-        .sheet(item: $editing) { item in
-            EditorView(sourceURL: item.url) { editing = nil }
-        }
     }
 
     // MARK: - Header
@@ -123,7 +118,7 @@ struct ContentView: View {
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(Color.primary.opacity(0.05), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+        .overlay(Capsule().strokeBorder(Color.primary.opacity(0.10), lineWidth: 1))
         .animation(Motion.move(reduce), value: recorder.isRecording)
     }
 
@@ -176,6 +171,16 @@ struct ContentView: View {
     @ViewBuilder
     private var sourcePicker: some View {
         switch sourceKind {
+        case .display where displays.isEmpty, .window where windows.isEmpty:
+            // An empty picker is a dead control; say what's missing instead.
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.dashed")
+                Text(sourceKind == .display ? "No displays available yet" : "No windows open to record")
+            }
+            .captionType()
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 5)
         case .display:
             Picker("", selection: $selectedDisplayID) {
                 ForEach(displays, id: \.displayID) { d in
@@ -286,11 +291,6 @@ struct ContentView: View {
                 .buttonStyle(ActionButtonStyle(variant: .prominent, tint: Palette.accent))
                 .disabled(!hasSelection)
                 .keyboardShortcut("r", modifiers: .command)
-
-                Text("⌘R")
-                    .captionType()
-                    .monospacedDigit()
-                    .foregroundStyle(.tertiary)
             }
         }
         .animation(Motion.move(reduce), value: recorder.isRecording)
@@ -316,7 +316,7 @@ struct ContentView: View {
             }
 
             HStack(spacing: Space.s) {
-                Button { editing = EditItem(url: url) } label: {
+                Button { EditorWindow.show(for: url) } label: {
                     Label("Polish & Export", systemImage: "wand.and.stars")
                 }
                 .buttonStyle(ActionButtonStyle(variant: .prominent))
@@ -353,7 +353,7 @@ struct ContentView: View {
         panel.allowedContentTypes = [.mpeg4Movie, .quickTimeMovie]
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            editing = EditItem(url: url)
+            EditorWindow.show(for: url)
         }
     }
 
@@ -368,7 +368,7 @@ struct ContentView: View {
                 }
                 feedback = list.isEmpty
                     ? Feedback(.warning, "No displays visible yet — grant Screen Recording access to continue.")
-                    : Feedback(.status, "Pick what to capture, then hit record.")
+                    : Feedback(.status, "Pick what to capture, then press ⌘R.")
             case .window:
                 let list = try await recorder.availableWindows()
                 windows = list

@@ -24,10 +24,12 @@ struct ReclipApp: App {
     var body: some Scene {
         WindowGroup("Reclip") {
             ContentView()
-                .frame(minWidth: 460, minHeight: 360)
+                .frame(minWidth: 480, minHeight: 560)
         }
-        .windowResizability(.contentSize)
+        // Content sets the floor, not the ceiling: the window can grow, and the
+        // capture column stays centred and readable at any width.
+        .windowResizability(.contentMinSize)
         .defaultPosition(.center)
-        .defaultSize(width: 480, height: 420)
+        .defaultSize(width: 520, height: 720)
     }
 }
