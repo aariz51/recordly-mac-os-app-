@@ -198,6 +198,26 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class DeviceEnumeratorTests: XCTestCase {
+    func testEnumerationReturnsWellFormedLists() {
+        // Enumeration must never crash and every entry must be addressable (non-empty
+        // id + name). The list may be empty on a headless CI box — that's valid.
+        for device in DeviceEnumerator.microphones() + DeviceEnumerator.cameras() {
+            XCTAssertFalse(device.id.isEmpty, "device id must be usable for selection")
+            XCTAssertFalse(device.name.isEmpty)
+        }
+        // At most one default per media type.
+        XCTAssertLessThanOrEqual(DeviceEnumerator.microphones().filter(\.isDefault).count, 1)
+        XCTAssertLessThanOrEqual(DeviceEnumerator.cameras().filter(\.isDefault).count, 1)
+    }
+
+    func testResolveFallsBackToDefault() {
+        // An unknown id resolves to the system default (or nil if none) — never crashes.
+        _ = DeviceEnumerator.microphone(id: "nonexistent-device-id")
+        _ = DeviceEnumerator.camera(id: nil)
+    }
+}
+
 final class WebcamSyncTests: XCTestCase {
     func testTargetTimeShiftsByOffsetAndClamps() {
         // 500ms offset shifts the webcam back half a second.

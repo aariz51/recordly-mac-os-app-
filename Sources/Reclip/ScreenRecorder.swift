@@ -37,6 +37,13 @@ final class ScreenRecorder: NSObject, ObservableObject {
     @Published var captureWebcam = false
     @Published var showCursor = true
 
+    /// Selected input devices (nil = system default). Populate the pickers from
+    /// `DeviceEnumerator.microphones()` / `.cameras()`.
+    @Published var microphoneDeviceID: String?
+    @Published var webcamDeviceID: String?
+    var availableMicrophones: [CaptureDeviceInfo] { DeviceEnumerator.microphones() }
+    var availableCameras: [CaptureDeviceInfo] { DeviceEnumerator.cameras() }
+
     private var stream: SCStream?
     private var writer: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
