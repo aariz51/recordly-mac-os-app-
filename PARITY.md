@@ -22,10 +22,10 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Source thumbnails + app icons | ❌ | picker is text-only |
 | Native backend (mac SCK) | ✅ | ScreenCaptureKit |
 | Target 60fps / retina | ✅ | config |
-| **Pause / Resume recording** | ❌ | start/stop only |
-| **Cancel (discard) recording** | ❌ | — |
-| Live REC timer | ✅ | elapsed |
-| **Countdown timer (3/5/10s)** | ❌ | — |
+| **Pause / Resume recording** | ✅ | `RecordingClock` (Recordly's accumulated-paused-duration model) + frame-drop pause, wired into ScreenRecorder; clock math unit-tested |
+| **Cancel (discard) recording** | 🟡 | clock.reset landed; UI discard action pending |
+| Live REC timer | ✅ | elapsed, now backed by RecordingClock |
+| **Countdown timer (3/5/10s)** | ✅ | `Countdown` model (remaining/finished) unit-tested; UI hookup pending |
 | Microphone capture | ✅ | captureMicrophone |
 | **Mic device selection + level meter** | ❌ | default device only |
 | **Mic processing profiles** | ❌ | raw only |
@@ -46,7 +46,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Trim | ✅ | StyledExport trim |
 | **Split clip** | ❌ | — |
 | **Clip model (per-clip speed grid, mute, volume, normalize)** | ❌ | single clip only |
-| **Undo / redo** | ❌ | — |
+| **Undo / redo** | ✅ | `EditorHistory` — bounded 100-entry stack, redo-clear on new edit, initialized/applied/unchanged/recorded results; unit-tested (UI keybinding pending) |
 | **Drag/resize regions on a timeline** | ❌ | UI (UI dev) |
 | Auto zoom (cursor) | ✅ | ZoomTimeline.autoZoom |
 | **Manual zoom regions (add/edit)** | ✅ | ZoomTimeline.addRegion + depth presets |
@@ -124,7 +124,7 @@ as a library instead of a subprocess.
 | Output dimension control | 🟡 | via aspect (batch 2) |
 | Reveal in Finder | ✅ | — |
 | Save dialog / Save-again / discard | 🟡 | fixed output path |
-| Export progress phases | ❌ | busy flag only |
+| Export progress phases | ✅ | `ExportProgress` phase model (preparing/extracting/rendering/finalizing/saving) + `saving(previous:)`; unit-tested |
 
 ## 9. Platform / workflow  (mostly ❌)
 Project files: **`.reclip` save/reopen of full editor state ✅ (ReclipProject)**; project browser, autosave, dirty-state/recovery, ~50 persisted
