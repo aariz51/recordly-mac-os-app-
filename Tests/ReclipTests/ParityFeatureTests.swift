@@ -231,6 +231,29 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testDirectionalArrowsExport() async throws {
+        let src = tmp("arr-src.mp4"); try await makeVideo(src)
+        // 8 compass directions, all should composite validly.
+        for angle in stride(from: 0.0, to: 360.0, by: 45.0) {
+            var a = Annotation(text: "", start: 0.1, end: 1.0)
+            a.kind = .arrow; a.arrowAngle = angle; a.position = CGPoint(x: 0.5, y: 0.5)
+            a.regionSize = CGSize(width: 0.25, height: 0.25); a.colorRGBA = [1, 0.3, 0.3, 1]
+            let out = tmp("arr-\(Int(angle)).mp4")
+            try await StyledExport.export(source: src, to: out, style: StyleOptions(), annotations: [a])
+            try await assertValid(out)
+        }
+    }
+
+    func testArrowAngleProjectRoundTrip() throws {
+        var a = Annotation(text: "", start: 0, end: 1); a.kind = .arrow; a.arrowAngle = 135
+        let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
+                                            style: StyleOptions(), zoom: ZoomTimeline(), webcam: WebcamSettings(),
+                                            annotations: [a], trimStart: 0, trimEnd: 0, speed: 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("arr.reclip")
+        try project.save(to: url)
+        XCTAssertEqual(try ReclipProject.load(from: url).annotationList().first?.arrowAngle ?? -1, 135, accuracy: 1e-9)
+    }
+
     func testAspectPresetCount() {
         XCTAssertEqual(StyleOptions.Aspect.allCases.count, 9, "8 ratio presets + Source")
         // Every non-source preset yields a positive ratio; portrait ones are < 1.

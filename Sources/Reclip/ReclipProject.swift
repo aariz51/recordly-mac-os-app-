@@ -84,6 +84,7 @@ struct ReclipProject: Codable, Equatable {
         var textColor: [Double] = [1, 1, 1, 1]
         var showBg: Bool = true
         var bgColor: [Double] = [0, 0, 0, 0.55]
+        var arrowAngle: Double = 0
     }
 
     // MARK: Capture / restore
@@ -118,7 +119,8 @@ struct ReclipProject: Codable, Equatable {
                     fontFraction: $0.fontFraction, kind: $0.kind.rawValue,
                     rw: $0.regionSize.width, rh: $0.regionSize.height, blurRadius: $0.blurRadius,
                     color: $0.colorRGBA, imageB64: $0.imageData?.base64EncodedString(),
-                    bold: $0.bold, textColor: $0.textColorRGBA, showBg: $0.showBackground, bgColor: $0.bgColorRGBA)
+                    bold: $0.bold, textColor: $0.textColorRGBA, showBg: $0.showBackground, bgColor: $0.bgColorRGBA,
+                    arrowAngle: $0.arrowAngle)
             },
             cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size),
             captionCues: captionCues.map { CueDTO(text: $0.text, start: $0.start, end: $0.end) },
@@ -174,6 +176,7 @@ struct ReclipProject: Codable, Equatable {
             a.textColorRGBA = c.textColor
             a.showBackground = c.showBg
             a.bgColorRGBA = c.bgColor
+            a.arrowAngle = c.arrowAngle
             return a
         }
     }

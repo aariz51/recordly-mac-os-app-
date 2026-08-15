@@ -27,6 +27,7 @@ struct Annotation: Identifiable, Equatable {
     var textColorRGBA: [Double] = [1, 1, 1, 1]           // text fill (default white)
     var showBackground: Bool = true                      // the rounded pill behind the text
     var bgColorRGBA: [Double] = [0, 0, 0, 0.55]          // pill colour
+    var arrowAngle: Double = 0                           // degrees, 0 = pointing right (for .arrow)
 }
 
 /// An annotation with any pre-rendered image (text/image kinds); region kinds render live.
@@ -184,6 +185,17 @@ enum Annotations {
         ctx.closePath()
         ctx.fillPath()
         guard let cg = ctx.makeImage() else { return nil }
-        return CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: rect.minX, y: rect.minY))
+        var img = CIImage(cgImage: cg)   // extent (0,0,W,H), arrow points right
+        // Rotate around the arrow's own center so it can point in any direction.
+        if abs(a.arrowAngle) > 0.01 {
+            let angle = CGFloat(a.arrowAngle) * .pi / 180
+            img = img.transformed(by: CGAffineTransform(translationX: -W / 2, y: -H / 2))
+                     .transformed(by: CGAffineTransform(rotationAngle: angle))
+                     .transformed(by: CGAffineTransform(translationX: W / 2, y: H / 2))
+        }
+        // Center the (possibly rotated) arrow in the region rect.
+        let e = img.extent
+        return img.transformed(by: CGAffineTransform(translationX: rect.midX - e.midX,
+                                                     y: rect.midY - e.midY))
     }
 }
