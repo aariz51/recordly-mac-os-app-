@@ -18,6 +18,7 @@ struct EditorView: View {
     @State private var webcam = WebcamSettings()
     @State private var annotations: [Annotation] = []
     @State private var newCaption = ""
+    @State private var speed: Double = 1.0
     @State private var player = AVPlayer()
     @State private var playerItem: AVPlayerItem?
     @State private var isExporting = false
@@ -78,8 +79,12 @@ struct EditorView: View {
             if duration > 0 {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Trim  \(timeLabel(trimStart)) – \(timeLabel(trimEnd))").font(.headline)
-                    Slider(value: $trimStart, in: 0...max(trimEnd - 0.2, 0.2))
-                    Slider(value: $trimEnd, in: min(trimStart + 0.2, duration)...duration)
+                    Slider(value: $trimStart, in: 0...max(trimEnd - 0.2, 0.2)) { e in if !e { Task { await rebuild() } } }
+                    Slider(value: $trimEnd, in: min(trimStart + 0.2, duration)...duration) { e in if !e { Task { await rebuild() } } }
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(format: "Speed  %.2f×", speed)).font(.headline)
+                    Slider(value: $speed, in: 0.25...4.0) { e in if !e { Task { await rebuild() } } }
                 }
             }
 
@@ -186,11 +191,11 @@ struct EditorView: View {
                 if trimEnd == 0 { trimEnd = duration }
             }
             updateZoom()
-            let composition = try await StyledExport.makeComposition(
-                for: asset, style: style, zoom: zoom, webcam: webcamFrames, webcamSettings: webcam,
-                annotations: annotations)
-            let item = AVPlayerItem(asset: asset)
-            item.videoComposition = composition
+            let tl = try await StyledExport.makeTimeline(
+                source: sourceURL, style: style, zoom: zoom, webcam: webcamFrames, webcamSettings: webcam,
+                annotations: annotations, trim: currentTrim(), speed: speed)
+            let item = AVPlayerItem(asset: tl.asset)
+            item.videoComposition = tl.video
             playerItem = item
             player.replaceCurrentItem(with: item)
             _ = await player.seek(to: .zero)
@@ -201,11 +206,20 @@ struct EditorView: View {
         }
     }
 
+    /// Trim range in SOURCE time, or nil if the whole clip is used.
+    private func currentTrim() -> CMTimeRange? {
+        guard duration > 0, (trimStart > 0.05 || trimEnd < duration - 0.05) else { return nil }
+        return CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
+                           duration: CMTime(seconds: trimEnd - trimStart, preferredTimescale: 600))
+    }
+
     private func addCaption() {
-        let now = player.currentTime().seconds
-        let start = now.isFinite ? now : 0
+        // Player time is OUTPUT time; convert to SOURCE time so captions stay in sync with trim/speed.
+        let outNow = player.currentTime().seconds
+        let out = outNow.isFinite ? outNow : 0
+        let srcStart = trimStart + out * speed
         annotations.append(Annotation(text: newCaption.trimmingCharacters(in: .whitespaces),
-                                      start: start, end: start + 3))
+                                      start: srcStart, end: srcStart + 3))
         newCaption = ""
         Task { await rebuild() }
     }
@@ -220,20 +234,16 @@ struct EditorView: View {
         status = asGif ? "Rendering GIF…" : "Rendering MP4…"
         let out = sourceURL.deletingPathExtension()
             .appendingPathExtension(asGif ? "styled.gif" : "styled.mp4")
-        var trim: CMTimeRange? = nil
-        if duration > 0, (trimStart > 0.05 || trimEnd < duration - 0.05) {
-            trim = CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
-                               duration: CMTime(seconds: trimEnd - trimStart, preferredTimescale: 600))
-        }
+        let trim = currentTrim()
         do {
             if asGif {
                 try await GifExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
                                            trim: trim, webcam: webcamFrames, webcamSettings: webcam,
-                                           annotations: annotations)
+                                           annotations: annotations, speed: speed)
             } else {
                 try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
                                               trim: trim, webcam: webcamFrames, webcamSettings: webcam,
-                                              annotations: annotations)
+                                              annotations: annotations, speed: speed)
             }
             exportedURL = out
             status = "Saved \(out.lastPathComponent)"

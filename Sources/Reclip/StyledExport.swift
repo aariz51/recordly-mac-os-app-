@@ -43,20 +43,54 @@ enum StyledExportError: LocalizedError {
 /// Renders a styled MP4 from a source recording using a per-frame Core Image pipeline.
 enum StyledExport {
 
-    /// Builds a styled Core Image composition for both live preview and export.
-    static func makeComposition(for asset: AVAsset,
-                                style: StyleOptions,
-                                zoom: ZoomTimeline = ZoomTimeline(),
-                                webcam: WebcamFrames = WebcamFrames(),
-                                webcamSettings: WebcamSettings = WebcamSettings(),
-                                annotations: [Annotation] = []) async throws -> AVMutableVideoComposition {
-        guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+    /// A playable timeline (trim + speed applied) plus its styled video composition.
+    struct StyledTimeline {
+        let asset: AVAsset
+        let video: AVMutableVideoComposition
+        let duration: Double
+    }
+
+    /// Builds a trimmed + speed-adjusted composition and its styled Core Image video
+    /// composition. Output time maps back to source time via `trimStart + outT * speed`,
+    /// so zoom, webcam and captions (all keyed to source time) stay in sync.
+    static func makeTimeline(source: URL,
+                             style: StyleOptions,
+                             zoom: ZoomTimeline = ZoomTimeline(),
+                             webcam: WebcamFrames = WebcamFrames(),
+                             webcamSettings: WebcamSettings = WebcamSettings(),
+                             annotations: [Annotation] = [],
+                             trim: CMTimeRange? = nil,
+                             speed: Double = 1.0) async throws -> StyledTimeline {
+        let srcAsset = AVURLAsset(url: source)
+        guard let vTrack = try await srcAsset.loadTracks(withMediaType: .video).first else {
             throw StyledExportError.noVideoTrack
         }
-        let naturalSize = try await track.load(.naturalSize)
-        let transform = try await track.load(.preferredTransform)
+        let naturalSize = try await vTrack.load(.naturalSize)
+        let transform = try await vTrack.load(.preferredTransform)
         let renderSize = naturalSize.applying(transform)
         let size = CGSize(width: abs(renderSize.width), height: abs(renderSize.height))
+        let fullDuration = try await srcAsset.load(.duration)
+        let srcRange = trim ?? CMTimeRange(start: .zero, duration: fullDuration)
+
+        let comp = AVMutableComposition()
+        guard let compV = comp.addMutableTrack(withMediaType: .video,
+                                               preferredTrackID: kCMPersistentTrackID_Invalid) else {
+            throw StyledExportError.exportSessionFailed("could not create composition track")
+        }
+        try compV.insertTimeRange(srcRange, of: vTrack, at: .zero)
+        compV.preferredTransform = transform
+        for aTrack in try await srcAsset.loadTracks(withMediaType: .audio) {
+            if let compA = comp.addMutableTrack(withMediaType: .audio,
+                                                preferredTrackID: kCMPersistentTrackID_Invalid) {
+                try? compA.insertTimeRange(srcRange, of: aTrack, at: .zero)
+            }
+        }
+
+        let clampedSpeed = max(0.25, min(speed, 4.0))
+        if abs(clampedSpeed - 1.0) > 0.01 {
+            let scaled = CMTimeMultiplyByFloat64(srcRange.duration, multiplier: 1.0 / clampedSpeed)
+            comp.scaleTimeRange(CMTimeRange(start: .zero, duration: srcRange.duration), toDuration: scaled)
+        }
 
         let shortSide = min(size.width, size.height)
         let padding = shortSide * style.paddingFraction
@@ -64,9 +98,11 @@ enum StyledExport {
         let ciContext = CIContext()
         let background = makeBackground(style.background, size: size)
         let renderedAnnotations = Annotations.prerender(annotations, canvas: size)
+        let trimStart = srcRange.start.seconds
 
-        let composition = AVMutableVideoComposition(asset: asset) { request in
-            let z = zoom.value(at: request.compositionTime.seconds)
+        let video = AVMutableVideoComposition(asset: comp) { request in
+            let srcT = trimStart + request.compositionTime.seconds * clampedSpeed
+            let z = zoom.value(at: srcT)
             let zoomed = applyZoom(request.sourceImage, scale: z.scale, focus: z.focus, canvas: size)
             let composed = compose(source: zoomed,
                                    background: background,
@@ -76,19 +112,14 @@ enum StyledExport {
                                    shadowOpacity: style.shadowOpacity,
                                    shadowRadius: style.shadowRadius,
                                    context: ciContext)
-            let withCam = WebcamOverlay.composite(base: composed,
-                                                  canvas: size,
-                                                  webcam: webcam,
-                                                  time: request.compositionTime.seconds,
-                                                  settings: webcamSettings)
-            let withText = Annotations.composite(base: withCam,
-                                                 canvas: size,
-                                                 rendered: renderedAnnotations,
-                                                 time: request.compositionTime.seconds)
+            let withCam = WebcamOverlay.composite(base: composed, canvas: size,
+                                                  webcam: webcam, time: srcT, settings: webcamSettings)
+            let withText = Annotations.composite(base: withCam, canvas: size,
+                                                 rendered: renderedAnnotations, time: srcT)
             request.finish(with: withText, context: nil)
         }
-        composition.renderSize = size
-        return composition
+        video.renderSize = size
+        return StyledTimeline(asset: comp, video: video, duration: comp.duration.seconds)
     }
 
     /// Scales the frame around a normalized (top-left origin) focus point, keeping the original extent.
@@ -110,19 +141,17 @@ enum StyledExport {
                        trim: CMTimeRange? = nil,
                        webcam: WebcamFrames = WebcamFrames(),
                        webcamSettings: WebcamSettings = WebcamSettings(),
-                       annotations: [Annotation] = []) async throws {
-        let asset = AVURLAsset(url: source)
-        let composition = try await makeComposition(for: asset, style: style, zoom: zoom,
-                                                    webcam: webcam, webcamSettings: webcamSettings,
-                                                    annotations: annotations)
-
-        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
+                       annotations: [Annotation] = [],
+                       speed: Double = 1.0) async throws {
+        let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
+                                        webcam: webcam, webcamSettings: webcamSettings,
+                                        annotations: annotations, trim: trim, speed: speed)
+        guard let export = AVAssetExportSession(asset: tl.asset, presetName: AVAssetExportPresetHighestQuality) else {
             throw StyledExportError.exportSessionFailed("could not create export session")
         }
-        export.videoComposition = composition
+        export.videoComposition = tl.video
         export.outputURL = output
         export.outputFileType = .mp4
-        if let trim { export.timeRange = trim }
         try? FileManager.default.removeItem(at: output)
 
         try await export.export(to: output, as: .mp4)

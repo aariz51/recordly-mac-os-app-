@@ -15,22 +15,21 @@ enum GifExport {
                        webcam: WebcamFrames = WebcamFrames(),
                        webcamSettings: WebcamSettings = WebcamSettings(),
                        annotations: [Annotation] = [],
+                       speed: Double = 1.0,
                        fps: Double = 12,
                        maxWidth: CGFloat = 720) async throws {
-        let asset = AVURLAsset(url: source)
-        let composition = try await StyledExport.makeComposition(for: asset, style: style, zoom: zoom,
-                                                                 webcam: webcam, webcamSettings: webcamSettings,
-                                                                 annotations: annotations)
+        let tl = try await StyledExport.makeTimeline(source: source, style: style, zoom: zoom,
+                                                     webcam: webcam, webcamSettings: webcamSettings,
+                                                     annotations: annotations, trim: trim, speed: speed)
 
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.videoComposition = composition
+        let generator = AVAssetImageGenerator(asset: tl.asset)
+        generator.videoComposition = tl.video
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
         generator.maximumSize = CGSize(width: maxWidth, height: maxWidth * 100)
 
-        let totalDuration = try await asset.load(.duration).seconds
-        let start = trim?.start.seconds ?? 0
-        let length = trim?.duration.seconds ?? totalDuration
+        let start = 0.0
+        let length = tl.duration
         let frameCount = max(1, Int(length * fps))
 
         try? FileManager.default.removeItem(at: output)
