@@ -22,6 +22,7 @@ struct WebcamSettings: Equatable {
     var corner: Corner = .bottomTrailing
     var sizeFraction: Double = 0.22   // width, as a fraction of the canvas short side
     var aspectRatio: Double = 1.0     // height / width (1 = square bubble)
+    var cropZoom: Double = 1.0        // 1 = full frame; >1 zooms into the center of the feed
     var marginFraction: Double = 0.04 // gap from the frame edge, fraction of short side
     var roundness: Double = 1.0       // 1 = fully round, 0 = square corners
     var mirror: Bool = true           // selfie-style horizontal flip
@@ -89,15 +90,18 @@ enum WebcamOverlay {
         let cropW: CGFloat, cropH: CGFloat
         if ext.width / ext.height > target { cropH = ext.height; cropW = ext.height * target }
         else { cropW = ext.width; cropH = ext.width / target }
-        let crop = CGRect(x: ext.midX - cropW / 2, y: ext.midY - cropH / 2, width: cropW, height: cropH)
+        // Optional center zoom into the feed (crop a smaller region, then scale it up to fill).
+        let zoom = CGFloat(max(1.0, min(settings.cropZoom, 3.0)))
+        let zCropW = cropW / zoom, zCropH = cropH / zoom
+        let crop = CGRect(x: ext.midX - zCropW / 2, y: ext.midY - zCropH / 2, width: zCropW, height: zCropH)
         var img = cam.cropped(to: crop)
             .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
         // Selfie-style horizontal mirror.
         if settings.mirror {
             img = img.transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-                .transformed(by: CGAffineTransform(translationX: cropW, y: 0))
+                .transformed(by: CGAffineTransform(translationX: zCropW, y: 0))
         }
-        img = img.transformed(by: CGAffineTransform(scaleX: bw / cropW, y: bh / cropH))
+        img = img.transformed(by: CGAffineTransform(scaleX: bw / zCropW, y: bh / zCropH))
 
         let cornerRadius = (min(bw, bh) / 2) * CGFloat(max(0, min(settings.roundness, 1)))
         let bubble = roundedMask(img, radius: cornerRadius)
