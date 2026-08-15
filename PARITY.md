@@ -95,14 +95,14 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 ## 6. Backgrounds / frame
 | Feature | Reclip | Note |
 |---|---|---|
-| Solid (15 swatches) | 🟡 | 2 solids |
-| Gradient (24 presets) | 🟡 | 3 gradients |
+| Solid (15 swatches) | ✅ | `BackgroundPresets` — 16-preset gallery (gradients + solids), all original colours |
+| Gradient (24 presets) | ✅ | `BackgroundPresets` gradient set (original, App-Store-clean) |
 | Padding | ✅ | linked only (no per-side) |
 | Rounded corners | ✅ | (no squircle) |
-| Drop shadow | ✅ | 1-layer |
-| **Background blur (blurred source)** | ✅ | batch 2 (this commit) |
-| **24 image wallpapers + video wallpaper + upload** | ❌ | — |
-| **Device frames** | ❌ | — |
+| Drop shadow | ✅ | 3-layer (VIDEO_SHADOW_LAYER_PROFILES) |
+| **Background blur (blurred source)** | ✅ | batch 2 |
+| **Image wallpaper (user upload)** | ✅ | `StyleOptions.backgroundImage` — aspect-filled, persisted in `.reclip` (own JPEGs not copied for licensing) |
+| **Device frames** | ✅ | `DeviceFrameRenderer` — macOS window + browser chrome (traffic lights, address pill) |
 | **Aspect ratio presets (8 + custom)** | 🟡 | 5 presets (batch 2) |
 | **Advanced per-side / vertical padding** | ❌ | — |
 
