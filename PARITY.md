@@ -115,7 +115,8 @@ as a library instead of a subprocess.
 | MP4 (H.264/AAC) | ✅ | StyledExport |
 | GIF | ✅ | GifExport |
 | MP4 quality (4 levels) | 🟡 | 3 levels (batch 1) |
-| **MP4 frame rate (24/30/60)** | ❌ | composition.frameDuration proven ineffective; needs AVAssetWriter re-encode |
+| **MP4 frame rate (24/30/60)** | ✅ | `exportReencoded` — AVAssetReader→AVAssetWriter with slot-based resampling (drops/dups frames); verified by counting real output frames |
+| **Resolution-aware bitrate tiers** | ✅ | `ExportBitrate` mirrors Recordly's 10/20/30M tiers + quality multiplier + 2M floor; applied via AVVideoAverageBitRateKey in the re-encode path |
 | **MP4 encoding mode / HW accel** | ❌ | fixed |
 | GIF loop toggle | ✅ | batch 1 |
 | GIF frame-rate (4) + size presets (3) | ✅ | GifSize presets + fps param |
