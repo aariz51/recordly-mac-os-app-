@@ -85,13 +85,14 @@ enum StyledExportError: LocalizedError {
 
 /// Renders a styled MP4 from a source recording using a per-frame Core Image pipeline.
 enum ExportQuality: String, CaseIterable, Identifiable {
+    case source = "Source"
     case high = "High"
     case medium = "Medium"
     case low = "Low"
     var id: String { rawValue }
     var preset: String {
         switch self {
-        case .high: return AVAssetExportPresetHighestQuality
+        case .source, .high: return AVAssetExportPresetHighestQuality
         case .medium: return AVAssetExportPresetMediumQuality
         case .low: return AVAssetExportPresetLowQuality
         }
@@ -114,9 +115,17 @@ enum ExportBitrate {
         if px <= 1920 * 1080 { return 20_000_000 }
         return 30_000_000
     }
+    /// Recordly's getSourceQualityBitrate — the maximum tier for the "Source" quality.
+    static func source(width: Int, height: Int) -> Int {
+        let px = width * height
+        if px > 2560 * 1440 { return 80_000_000 }
+        if px > 1920 * 1080 { return 50_000_000 }
+        return 30_000_000
+    }
     static func mp4(width: Int, height: Int, quality: ExportQuality) -> Int {
+        if quality == .source { return source(width: width, height: height) }
         let mult: Double
-        switch quality { case .high: mult = 1.0; case .medium: mult = 0.6; case .low: mult = 0.3 }
+        switch quality { case .source, .high: mult = 1.0; case .medium: mult = 0.6; case .low: mult = 0.3 }
         return max(minimum, Int(Double(base(width: width, height: height)) * mult))
     }
 }

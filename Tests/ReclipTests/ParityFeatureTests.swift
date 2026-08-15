@@ -354,6 +354,11 @@ final class ParityFeatureTests: XCTestCase {
                           ExportBitrate.mp4(width: 1920, height: 1080, quality: .high))
         XCTAssertGreaterThanOrEqual(ExportBitrate.mp4(width: 320, height: 240, quality: .low),
                                     ExportBitrate.minimum)   // never below the floor
+        // Source is the max tier — above High at every resolution.
+        XCTAssertEqual(ExportQuality.allCases.count, 4)
+        XCTAssertGreaterThan(ExportBitrate.mp4(width: 3840, height: 2160, quality: .source),
+                             ExportBitrate.mp4(width: 3840, height: 2160, quality: .high))
+        XCTAssertEqual(ExportBitrate.mp4(width: 3840, height: 2160, quality: .source), 80_000_000)
     }
 
     /// The re-encode path must actually change the output frame-rate — this is the gap
