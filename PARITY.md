@@ -68,9 +68,12 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 ## 4. Cursor polish engine  🟡 (v1 landed)
 Reclip now renders a stylized cursor (arrow/dot) from the tracked path with smooth
 interpolation, size control, and correct source-space compositing so crop/zoom carry it
-(CursorRenderer + CursorStyle; capture with showCursor=false). Still missing vs Recordly:
-more cursor styles, smoothing/lag tuning, motion blur, click bounce + 4 click effects,
-sway, loop mode, motion presets. **Visual look needs your review** (can't verify blind).
+(CursorRenderer + CursorStyle; capture with showCursor=false). The **motion math is now
+ported and unit-tested**: `MotionSmoothing` (analytical damped-spring cursor+zoom
+smoothing, exact Recordly tuning), `CursorSway` (speed-scaled rotation), and
+`CursorClickEffect` (click-bounce sine dip + delayed ripple timing). Still needs **your
+eyes to tune the look** (spring feel, sway amount, ripple color/opacity) and wiring into
+the render/capture path; more cursor styles, loop mode, and motion presets remain.
 
 ## 5. Webcam overlay
 | Feature | Reclip | Note |
