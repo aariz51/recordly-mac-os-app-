@@ -13,9 +13,10 @@ struct WebcamSettings: Equatable {
     }
     var enabled = false
     var corner: Corner = .bottomTrailing
-    var sizeFraction: Double = 0.22   // fraction of the canvas short side
+    var sizeFraction: Double = 0.22   // width, as a fraction of the canvas short side
+    var aspectRatio: Double = 1.0     // height / width (1 = square bubble)
     var marginFraction: Double = 0.04 // gap from the frame edge, fraction of short side
-    var roundness: Double = 1.0       // 1 = circle, 0 = square corners
+    var roundness: Double = 1.0       // 1 = fully round, 0 = square corners
     var mirror: Bool = true           // selfie-style horizontal flip
     var shadow: Bool = true           // soft drop shadow behind the bubble
 }
@@ -72,32 +73,36 @@ enum WebcamOverlay {
         guard settings.enabled, let cam = webcam.nearest(time) else { return base }
 
         let shortSide = min(canvas.width, canvas.height)
-        let diameter = shortSide * settings.sizeFraction
+        let bw = shortSide * CGFloat(settings.sizeFraction)               // bubble width
+        let bh = bw * CGFloat(max(0.2, min(settings.aspectRatio, 5.0)))   // bubble height
 
-        // Center-crop the camera frame to a square.
+        // Crop the camera frame to the bubble's aspect (bw:bh), centered.
         let ext = cam.extent
-        let side = min(ext.width, ext.height)
-        let crop = CGRect(x: ext.midX - side / 2, y: ext.midY - side / 2, width: side, height: side)
-        var square = cam.cropped(to: crop)
+        let target = bw / bh
+        let cropW: CGFloat, cropH: CGFloat
+        if ext.width / ext.height > target { cropH = ext.height; cropW = ext.height * target }
+        else { cropW = ext.width; cropH = ext.width / target }
+        let crop = CGRect(x: ext.midX - cropW / 2, y: ext.midY - cropH / 2, width: cropW, height: cropH)
+        var img = cam.cropped(to: crop)
             .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
         // Selfie-style horizontal mirror.
         if settings.mirror {
-            square = square.transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-                .transformed(by: CGAffineTransform(translationX: side, y: 0))
+            img = img.transformed(by: CGAffineTransform(scaleX: -1, y: 1))
+                .transformed(by: CGAffineTransform(translationX: cropW, y: 0))
         }
-        square = square.transformed(by: CGAffineTransform(scaleX: diameter / side, y: diameter / side))
+        img = img.transformed(by: CGAffineTransform(scaleX: bw / cropW, y: bh / cropH))
 
-        let cornerRadius = (diameter / 2) * CGFloat(max(0, min(settings.roundness, 1)))
-        let bubble = roundedMask(square, diameter: diameter, radius: cornerRadius)
+        let cornerRadius = (min(bw, bh) / 2) * CGFloat(max(0, min(settings.roundness, 1)))
+        let bubble = roundedMask(img, radius: cornerRadius)
 
         let margin = shortSide * CGFloat(settings.marginFraction)
         let x: CGFloat
         let y: CGFloat
         switch settings.corner {
-        case .bottomTrailing: x = canvas.width - diameter - margin; y = margin
-        case .bottomLeading:  x = margin;                           y = margin
-        case .topTrailing:    x = canvas.width - diameter - margin; y = canvas.height - diameter - margin
-        case .topLeading:     x = margin;                           y = canvas.height - diameter - margin
+        case .bottomTrailing: x = canvas.width - bw - margin; y = margin
+        case .bottomLeading:  x = margin;                     y = margin
+        case .topTrailing:    x = canvas.width - bw - margin; y = canvas.height - bh - margin
+        case .topLeading:     x = margin;                     y = canvas.height - bh - margin
         }
         let positioned = bubble.transformed(by: CGAffineTransform(translationX: x, y: y))
 
@@ -108,7 +113,7 @@ enum WebcamOverlay {
         return positioned.composited(over: result)
     }
 
-    private static func roundedMask(_ image: CIImage, diameter: CGFloat, radius: CGFloat) -> CIImage {
+    private static func roundedMask(_ image: CIImage, radius: CGFloat) -> CIImage {
         let extent = image.extent
         let gen = CIFilter.roundedRectangleGenerator()
         gen.color = .white

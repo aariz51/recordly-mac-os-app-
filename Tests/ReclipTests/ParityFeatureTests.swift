@@ -124,4 +124,17 @@ final class ParityFeatureTests: XCTestCase {
         }
     }
 
+    func testWebcamNonSquareAspect() async throws {
+        let src = tmp("wcna-src.mp4"); try await makeVideo(src)
+        let cam = WebcamRecorder.sidecarURL(for: src)
+        try await makeVideo(cam, size: CGSize(width: 400, height: 300))
+        let frames = await WebcamOverlay.load(for: src)
+        XCTAssertFalse(frames.isEmpty)
+        var wc = WebcamSettings()
+        wc.enabled = true; wc.aspectRatio = 0.6; wc.roundness = 0.3; wc.sizeFraction = 0.3
+        let out = tmp("wcna.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(),
+                                      webcam: frames, webcamSettings: wc)
+        try await assertValid(out)
+    }
 }
