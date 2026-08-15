@@ -15,6 +15,7 @@ struct ReclipProject: Codable, Equatable {
     var shadowRadius: Double
     var backgroundBlur: Double
     var aspect: String
+    var deviceFrame: String = DeviceFrame.none.rawValue
     var crop: Crop
 
     var zoomRegions: [Zoom]
@@ -97,6 +98,7 @@ struct ReclipProject: Codable, Equatable {
             shadowRadius: style.shadowRadius,
             backgroundBlur: style.backgroundBlur,
             aspect: style.aspect.rawValue,
+            deviceFrame: style.deviceFrame.rawValue,
             crop: Crop(top: style.crop.top, bottom: style.crop.bottom, left: style.crop.left, right: style.crop.right),
             zoomRegions: zoom.regions.map { Zoom(start: $0.start, end: $0.end, scale: Double($0.scale), fx: $0.focus.x, fy: $0.focus.y) },
             zoomEasing: zoom.easing.rawValue,
@@ -126,6 +128,7 @@ struct ReclipProject: Codable, Equatable {
         s.shadowRadius = shadowRadius
         s.backgroundBlur = backgroundBlur
         s.aspect = StyleOptions.Aspect(rawValue: aspect) ?? .source
+        s.deviceFrame = DeviceFrame(rawValue: deviceFrame) ?? .none
         s.crop = StyleOptions.CropInsets(top: crop.top, bottom: crop.bottom, left: crop.left, right: crop.right)
         return s
     }

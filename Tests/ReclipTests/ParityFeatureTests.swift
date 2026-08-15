@@ -231,6 +231,37 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testDeviceFrameExports() async throws {
+        let src = tmp("frame-src.mp4"); try await makeVideo(src)
+        for frame in [DeviceFrame.macOS, .browser] {
+            var s = StyleOptions(); s.deviceFrame = frame
+            let out = tmp("frame-\(frame.rawValue).mp4")
+            try await StyledExport.export(source: src, to: out, style: s)
+            try await assertValid(out)
+        }
+    }
+
+    func testDeviceFrameAddsChromeBar() {
+        // The renderer must return a strictly taller image (bar added above the footage).
+        let footage = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let framed = DeviceFrameRenderer.apply(footage, frame: .macOS)
+        XCTAssertGreaterThan(framed.extent.height, 300, "chrome bar should increase height")
+        XCTAssertEqual(framed.extent.width, 400, accuracy: 1, "width is unchanged")
+        // `.none` is a passthrough.
+        let none = DeviceFrameRenderer.apply(footage, frame: .none)
+        XCTAssertEqual(none.extent.height, 300, accuracy: 1)
+    }
+
+    func testDeviceFrameProjectRoundTrip() throws {
+        var s = StyleOptions(); s.deviceFrame = .browser
+        let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
+                                            style: s, zoom: ZoomTimeline(), webcam: WebcamSettings(),
+                                            annotations: [], trimStart: 0, trimEnd: 0, speed: 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("frame.reclip")
+        try project.save(to: url)
+        XCTAssertEqual(try ReclipProject.load(from: url).style().deviceFrame, .browser)
+    }
+
     func testBackgroundPresetLibrary() {
         let all = BackgroundPresets.all
         XCTAssertGreaterThanOrEqual(all.count, 12, "should offer a full preset gallery")

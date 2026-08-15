@@ -51,6 +51,7 @@ struct StyleOptions: Equatable {
     var shadowRadius: Double = 24
     var backgroundBlur: Double = 0         // 0 = off; blurs the source behind as the backdrop
     var aspect: Aspect = .source
+    var deviceFrame: DeviceFrame = .none   // optional window/browser chrome around the footage
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
     struct CropInsets: Equatable {
@@ -226,7 +227,8 @@ enum StyledExport {
                 : staticBackground
             let z = zoom.value(at: srcT)
             let zoomed = applyZoom(frame, scale: z.scale, focus: z.focus, canvas: canvas)
-            let composed = compose(source: zoomed,
+            let framed = DeviceFrameRenderer.apply(zoomed, frame: style.deviceFrame)
+            let composed = compose(source: framed,
                                    background: background,
                                    canvas: canvas,
                                    padding: padding,
