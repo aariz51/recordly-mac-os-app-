@@ -131,11 +131,16 @@ library instead of a subprocess.
 | Save dialog / Save-again / discard | 🟡 | fixed output path |
 | Export progress phases | ✅ | `ExportProgress` phase model (preparing/extracting/rendering/finalizing/saving) + `saving(previous:)`; unit-tested |
 
-## 9. Platform / workflow  (mostly ❌)
-Project files: **`.reclip` save/reopen of full editor state ✅ (ReclipProject)**; project browser, autosave, dirty-state/recovery, ~50 persisted
-prefs + named presets, rebindable keyboard shortcuts + reference, auto-update, theme,
-**9-locale i18n**, custom fonts, and the **entire extension/plugin + marketplace system** —
-**none present in Reclip.**
+## 9. Platform / workflow  (partial)
+Project files: **`.reclip` save/reopen of full editor state ✅ (ReclipProject)** + **dirty-state
+tracking ✅ (`DocumentState`)**. **Timeline core model ✅ (`TimelineModel`** — span overlap/clamp,
+playhead+axis time formatting, track-row IDs; the pure data layer the timeline UI consumes).
+**Extension system foundation ✅ (`ExtensionManifest` + `ExtensionRegistry`** — schema
+validation + permission gating). Note: the extension **marketplace / dynamic-JS loading is
+deliberately out of scope** — a native App Store app can't download+execute remote code
+(§2.5.2), so extensions here would be built-in/curated, not a JS plugin market.
+Still absent: project browser, autosave/recovery, ~50 persisted prefs + named presets,
+rebindable keyboard shortcuts, auto-update, theme, **9-locale i18n**, custom fonts.
 
 ---
 
