@@ -17,6 +17,7 @@ struct ReclipProject: Codable, Equatable {
     var aspect: String
     var deviceFrame: String = DeviceFrame.none.rawValue
     var crop: Crop
+    var padInsets: Pad? = nil
 
     var zoomRegions: [Zoom]
     var zoomEasing: String = ZoomEasing.smooth.rawValue
@@ -64,6 +65,7 @@ struct ReclipProject: Codable, Equatable {
         }
     }
     struct Crop: Codable, Equatable { var top = 0.0; var bottom = 0.0; var left = 0.0; var right = 0.0 }
+    struct Pad: Codable, Equatable { var top = 0.06; var bottom = 0.06; var left = 0.06; var right = 0.06 }
     struct Zoom: Codable, Equatable { var start: Double; var end: Double; var scale: Double; var fx: Double; var fy: Double }
     struct Cam: Codable, Equatable {
         var enabled: Bool; var corner: String; var size: Double; var margin: Double
@@ -100,6 +102,7 @@ struct ReclipProject: Codable, Equatable {
             aspect: style.aspect.rawValue,
             deviceFrame: style.deviceFrame.rawValue,
             crop: Crop(top: style.crop.top, bottom: style.crop.bottom, left: style.crop.left, right: style.crop.right),
+            padInsets: style.paddingInsets.map { Pad(top: $0.top, bottom: $0.bottom, left: $0.left, right: $0.right) },
             zoomRegions: zoom.regions.map { Zoom(start: $0.start, end: $0.end, scale: Double($0.scale), fx: $0.focus.x, fy: $0.focus.y) },
             zoomEasing: zoom.easing.rawValue,
             zoomRamp: zoom.ramp,
@@ -130,6 +133,7 @@ struct ReclipProject: Codable, Equatable {
         s.aspect = StyleOptions.Aspect(rawValue: aspect) ?? .source
         s.deviceFrame = DeviceFrame(rawValue: deviceFrame) ?? .none
         s.crop = StyleOptions.CropInsets(top: crop.top, bottom: crop.bottom, left: crop.left, right: crop.right)
+        s.paddingInsets = padInsets.map { StyleOptions.PaddingInsets(top: $0.top, bottom: $0.bottom, left: $0.left, right: $0.right) }
         return s
     }
 

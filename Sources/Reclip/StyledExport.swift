@@ -45,7 +45,14 @@ struct StyleOptions: Equatable {
     /// and takes precedence over `background`. Kept as a separate field (rather than a new
     /// `Background` case) so existing exhaustive switches over `Background` are unaffected.
     var backgroundImage: Data? = nil
-    var paddingFraction: Double = 0.06     // fraction of the shorter side
+    var paddingFraction: Double = 0.06     // fraction of the shorter side (linked, symmetric)
+    /// Optional per-side padding (fractions of canvas width/height). When set it overrides
+    /// the linked `paddingFraction`, so the footage need not be centered.
+    struct PaddingInsets: Equatable {
+        var top: Double = 0.06; var bottom: Double = 0.06
+        var left: Double = 0.06; var right: Double = 0.06
+    }
+    var paddingInsets: PaddingInsets? = nil
     var cornerRadiusFraction: Double = 0.03
     var shadowOpacity: Double = 0.35
     var shadowRadius: Double = 24
@@ -207,6 +214,16 @@ enum StyledExport {
         let shortSide = min(canvas.width, canvas.height)
         let padding = shortSide * style.paddingFraction
         let corner = shortSide * style.cornerRadiusFraction
+        // The rect (canvas coords, bottom-origin) the footage is fit + centered into.
+        let contentRect: CGRect = {
+            guard let ins = style.paddingInsets else {
+                return CGRect(x: padding, y: padding,
+                              width: canvas.width - padding * 2, height: canvas.height - padding * 2)
+            }
+            let l = canvas.width * ins.left, r = canvas.width * ins.right
+            let t = canvas.height * ins.top, b = canvas.height * ins.bottom
+            return CGRect(x: l, y: b, width: max(canvas.width - l - r, 1), height: max(canvas.height - t - b, 1))
+        }()
         let ciContext = CIContext()
         let staticBackground = style.backgroundImage.map { makeImageBackground($0, size: canvas) }
             ?? makeBackground(style.background, size: canvas)
@@ -231,7 +248,7 @@ enum StyledExport {
             let composed = compose(source: framed,
                                    background: background,
                                    canvas: canvas,
-                                   padding: padding,
+                                   contentRect: contentRect,
                                    corner: corner,
                                    shadowOpacity: style.shadowOpacity,
                                    shadowRadius: style.shadowRadius,
@@ -570,13 +587,13 @@ enum StyledExport {
     private static func compose(source: CIImage,
                                 background: CIImage,
                                 canvas: CGSize,
-                                padding: CGFloat,
+                                contentRect: CGRect,
                                 corner: CGFloat,
                                 shadowOpacity: Double,
                                 shadowRadius: Double,
                                 context: CIContext) -> CIImage {
-        let targetWidth = canvas.width - padding * 2
-        let targetHeight = canvas.height - padding * 2
+        let targetWidth = contentRect.width
+        let targetHeight = contentRect.height
         let srcExtent = source.extent
         guard srcExtent.width > 0, srcExtent.height > 0 else { return background }
 
@@ -584,8 +601,9 @@ enum StyledExport {
         let scaled = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
         let scaledExtent = scaled.extent
 
-        let originX = (canvas.width - scaledExtent.width) / 2 - scaledExtent.minX
-        let originY = (canvas.height - scaledExtent.height) / 2 - scaledExtent.minY
+        // Center the footage within the content rect (not necessarily the whole canvas).
+        let originX = contentRect.midX - scaledExtent.width / 2 - scaledExtent.minX
+        let originY = contentRect.midY - scaledExtent.height / 2 - scaledExtent.minY
         let positioned = scaled.transformed(by: CGAffineTransform(translationX: originX, y: originY))
 
         // Rounded-corner mask over the positioned footage.

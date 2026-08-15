@@ -231,6 +231,29 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testPerSidePaddingExports() async throws {
+        let src = tmp("pad-src.mp4"); try await makeVideo(src)
+        var s = StyleOptions()
+        s.paddingInsets = .init(top: 0.02, bottom: 0.20, left: 0.15, right: 0.05)  // asymmetric
+        let out = tmp("pad.mp4")
+        try await StyledExport.export(source: src, to: out, style: s)
+        let d = try await dims(out)
+        try await assertValid(out)
+        XCTAssertGreaterThan(d.width, 0)   // canvas unchanged; footage repositioned within it
+    }
+
+    func testPerSidePaddingProjectRoundTrip() throws {
+        var s = StyleOptions(); s.paddingInsets = .init(top: 0.03, bottom: 0.11, left: 0.07, right: 0.02)
+        let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
+                                            style: s, zoom: ZoomTimeline(), webcam: WebcamSettings(),
+                                            annotations: [], trimStart: 0, trimEnd: 0, speed: 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pad.reclip")
+        try project.save(to: url)
+        let loaded = try ReclipProject.load(from: url).style().paddingInsets
+        XCTAssertEqual(loaded?.bottom ?? -1, 0.11, accuracy: 1e-9)
+        XCTAssertEqual(loaded?.left ?? -1, 0.07, accuracy: 1e-9)
+    }
+
     func testDeviceFrameExports() async throws {
         let src = tmp("frame-src.mp4"); try await makeVideo(src)
         for frame in [DeviceFrame.macOS, .browser] {
