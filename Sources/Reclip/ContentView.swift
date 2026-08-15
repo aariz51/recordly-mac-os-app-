@@ -43,6 +43,8 @@ struct ContentView: View {
                         .disabled(recorder.isRecording)
                     Toggle("Microphone", isOn: $recorder.captureMicrophone)
                         .disabled(recorder.isRecording)
+                    Toggle("Webcam", isOn: $recorder.captureWebcam)
+                        .disabled(recorder.isRecording || !WebcamRecorder.hasCamera)
                 }
                 .padding(8)
             }

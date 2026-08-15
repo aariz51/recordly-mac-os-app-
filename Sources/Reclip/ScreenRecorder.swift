@@ -33,6 +33,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
     @Published private(set) var elapsed: TimeInterval = 0
     @Published var captureMicrophone = false
     @Published var captureSystemAudio = true
+    @Published var captureWebcam = false
 
     private var stream: SCStream?
     private var writer: AVAssetWriter?
@@ -45,6 +46,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
 
     private let sampleQueue = DispatchQueue(label: "com.aariz51.reclip.sample")
     private let cursorSampler = CursorSampler()
+    private let webcamRecorder = WebcamRecorder()
     private(set) var outputURL: URL?
 
     // MARK: - Discovery
@@ -123,6 +125,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         isRecording = true
         wallStart = Date()
         cursorSampler.start()
+        if captureWebcam { webcamRecorder.start(besides: url) }
         startElapsedTimer()
     }
 
@@ -131,6 +134,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         try await stream.stopCapture()
         self.stream = nil
 
+        webcamRecorder.stop()
         let track = cursorSampler.stop()
         if let url = outputURL { track.save(besides: url) }
 
