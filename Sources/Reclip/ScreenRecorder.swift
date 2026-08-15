@@ -250,6 +250,14 @@ extension ScreenRecorder: SCStreamOutput {
                             didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
                             of type: SCStreamOutputType) {
         guard CMSampleBufferDataIsReady(sampleBuffer) else { return }
+        // Only complete screen frames carry a valid image; idle/blank/suspended frames
+        // must be dropped or they corrupt the output ("media may be damaged").
+        if type == .screen {
+            guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+                    as? [[SCStreamFrameInfo: Any]],
+                  let statusRaw = attachments.first?[.status] as? Int,
+                  statusRaw == SCFrameStatus.complete.rawValue else { return }
+        }
         Task { @MainActor in self.append(sampleBuffer, of: type) }
     }
 
