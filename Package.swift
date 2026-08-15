@@ -9,6 +9,12 @@ let package = Package(
             name: "Reclip",
             path: "Sources/Reclip",
             swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        .testTarget(
+            name: "ReclipTests",
+            dependencies: ["Reclip"],
+            path: "Tests/ReclipTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
         )
     ]
 )

@@ -35,7 +35,7 @@ struct ZoomTimeline: Equatable {
     /// Build zoom regions automatically from cursor dwell clusters.
     static func autoZoom(from track: CursorTrack, duration: Double,
                          segment: Double = 3.0, scale: CGFloat = 1.7) -> ZoomTimeline {
-        guard duration > segment, !track.samples.isEmpty else { return ZoomTimeline() }
+        guard duration > 0.3, !track.samples.isEmpty else { return ZoomTimeline() }
         var regions: [ZoomRegion] = []
         var t = 0.0
         while t < duration {
