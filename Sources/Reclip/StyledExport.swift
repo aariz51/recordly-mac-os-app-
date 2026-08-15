@@ -48,7 +48,8 @@ enum StyledExport {
                                 style: StyleOptions,
                                 zoom: ZoomTimeline = ZoomTimeline(),
                                 webcam: WebcamFrames = WebcamFrames(),
-                                webcamSettings: WebcamSettings = WebcamSettings()) async throws -> AVMutableVideoComposition {
+                                webcamSettings: WebcamSettings = WebcamSettings(),
+                                annotations: [Annotation] = []) async throws -> AVMutableVideoComposition {
         guard let track = try await asset.loadTracks(withMediaType: .video).first else {
             throw StyledExportError.noVideoTrack
         }
@@ -62,6 +63,7 @@ enum StyledExport {
         let corner = shortSide * style.cornerRadiusFraction
         let ciContext = CIContext()
         let background = makeBackground(style.background, size: size)
+        let renderedAnnotations = Annotations.prerender(annotations, canvas: size)
 
         let composition = AVMutableVideoComposition(asset: asset) { request in
             let z = zoom.value(at: request.compositionTime.seconds)
@@ -79,7 +81,11 @@ enum StyledExport {
                                                   webcam: webcam,
                                                   time: request.compositionTime.seconds,
                                                   settings: webcamSettings)
-            request.finish(with: withCam, context: nil)
+            let withText = Annotations.composite(base: withCam,
+                                                 canvas: size,
+                                                 rendered: renderedAnnotations,
+                                                 time: request.compositionTime.seconds)
+            request.finish(with: withText, context: nil)
         }
         composition.renderSize = size
         return composition
@@ -103,10 +109,12 @@ enum StyledExport {
                        zoom: ZoomTimeline = ZoomTimeline(),
                        trim: CMTimeRange? = nil,
                        webcam: WebcamFrames = WebcamFrames(),
-                       webcamSettings: WebcamSettings = WebcamSettings()) async throws {
+                       webcamSettings: WebcamSettings = WebcamSettings(),
+                       annotations: [Annotation] = []) async throws {
         let asset = AVURLAsset(url: source)
         let composition = try await makeComposition(for: asset, style: style, zoom: zoom,
-                                                    webcam: webcam, webcamSettings: webcamSettings)
+                                                    webcam: webcam, webcamSettings: webcamSettings,
+                                                    annotations: annotations)
 
         guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality) else {
             throw StyledExportError.exportSessionFailed("could not create export session")

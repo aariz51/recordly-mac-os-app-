@@ -16,6 +16,8 @@ struct EditorView: View {
     @State private var webcamFrames = WebcamFrames()
     @State private var webcamLoaded = false
     @State private var webcam = WebcamSettings()
+    @State private var annotations: [Annotation] = []
+    @State private var newCaption = ""
     @State private var player = AVPlayer()
     @State private var playerItem: AVPlayerItem?
     @State private var isExporting = false
@@ -95,6 +97,27 @@ struct EditorView: View {
                     .font(.caption2).foregroundStyle(.secondary)
             }
 
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Captions").font(.headline)
+                HStack {
+                    TextField("Caption text", text: $newCaption)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Add") { addCaption() }
+                        .disabled(newCaption.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                ForEach(annotations) { a in
+                    HStack {
+                        Text("\(timeLabel(a.start))  \(a.text)").font(.caption).lineLimit(1)
+                        Spacer()
+                        Button {
+                            annotations.removeAll { $0.id == a.id }
+                            Task { await rebuild() }
+                        } label: { Image(systemName: "trash") }
+                            .buttonStyle(.borderless)
+                    }
+                }
+            }
+
             Divider()
 
             Button {
@@ -164,7 +187,8 @@ struct EditorView: View {
             }
             updateZoom()
             let composition = try await StyledExport.makeComposition(
-                for: asset, style: style, zoom: zoom, webcam: webcamFrames, webcamSettings: webcam)
+                for: asset, style: style, zoom: zoom, webcam: webcamFrames, webcamSettings: webcam,
+                annotations: annotations)
             let item = AVPlayerItem(asset: asset)
             item.videoComposition = composition
             playerItem = item
@@ -175,6 +199,15 @@ struct EditorView: View {
         } catch {
             status = "Preview error: \(error.localizedDescription)"
         }
+    }
+
+    private func addCaption() {
+        let now = player.currentTime().seconds
+        let start = now.isFinite ? now : 0
+        annotations.append(Annotation(text: newCaption.trimmingCharacters(in: .whitespaces),
+                                      start: start, end: start + 3))
+        newCaption = ""
+        Task { await rebuild() }
     }
 
     private func timeLabel(_ t: Double) -> String {
@@ -195,10 +228,12 @@ struct EditorView: View {
         do {
             if asGif {
                 try await GifExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
-                                           trim: trim, webcam: webcamFrames, webcamSettings: webcam)
+                                           trim: trim, webcam: webcamFrames, webcamSettings: webcam,
+                                           annotations: annotations)
             } else {
                 try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
-                                              trim: trim, webcam: webcamFrames, webcamSettings: webcam)
+                                              trim: trim, webcam: webcamFrames, webcamSettings: webcam,
+                                              annotations: annotations)
             }
             exportedURL = out
             status = "Saved \(out.lastPathComponent)"
