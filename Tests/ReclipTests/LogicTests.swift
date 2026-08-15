@@ -198,6 +198,78 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class EditorHistoryTests: XCTestCase {
+    func testRecordInitializeUnchangedAndRecorded() {
+        var h = EditorHistory<String>()
+        XCTAssertEqual(h.record("a"), .initialized)
+        XCTAssertEqual(h.record("a"), .unchanged)     // identical → no history entry
+        XCTAssertFalse(h.canUndo)
+        XCTAssertEqual(h.record("b"), .recorded)
+        XCTAssertTrue(h.canUndo)
+        XCTAssertEqual(h.current, "b")
+    }
+
+    func testUndoRedoRoundTrip() {
+        var h = EditorHistory<String>()
+        h.record("a"); h.record("b"); h.record("c")
+        XCTAssertEqual(h.undo(fallbackCurrent: "c"), "b")
+        XCTAssertEqual(h.undo(fallbackCurrent: "b"), "a")
+        XCTAssertNil(h.undo(fallbackCurrent: "a"))       // nothing older
+        XCTAssertEqual(h.redo(fallbackCurrent: "a"), "b")
+        XCTAssertEqual(h.redo(fallbackCurrent: "b"), "c")
+        XCTAssertNil(h.redo(fallbackCurrent: "c"))
+        XCTAssertEqual(h.current, "c")
+    }
+
+    func testNewEditClearsRedoStack() {
+        var h = EditorHistory<String>()
+        h.record("a"); h.record("b")
+        _ = h.undo(fallbackCurrent: "b")                 // now redo available
+        XCTAssertTrue(h.canRedo)
+        XCTAssertEqual(h.record("c"), .recorded)         // a fresh edit
+        XCTAssertFalse(h.canRedo, "a new edit discards the redo branch")
+    }
+
+    func testMaxEntriesBounded() {
+        var h = EditorHistory<Int>(); h.record(0)
+        for i in 1...150 { h.record(i, maxEntries: 100) }
+        XCTAssertLessThanOrEqual(h.past.count, 100)
+        XCTAssertEqual(h.current, 150)
+    }
+
+    func testApplyingHistoryReplacesWithoutPushing() {
+        var h = EditorHistory<String>()
+        h.record("a"); h.record("b")
+        let before = h.past.count
+        XCTAssertEqual(h.record("z", applyingHistory: true), .applied)
+        XCTAssertEqual(h.past.count, before, "replaying history must not push onto past")
+        XCTAssertEqual(h.current, "z")
+    }
+}
+
+final class ExportProgressTests: XCTestCase {
+    func testPercentageFromFrames() {
+        let p = ExportProgress.make(currentFrame: 25, totalFrames: 100, phase: .rendering)
+        XCTAssertEqual(p.percentage, 25, accuracy: 1e-9)
+        XCTAssertEqual(p.phase, .rendering)
+        // Zero total → 0% (no divide-by-zero), and it clamps to 100.
+        XCTAssertEqual(ExportProgress.make(currentFrame: 5, totalFrames: 0, phase: .preparing).percentage, 0)
+        XCTAssertEqual(ExportProgress.make(currentFrame: 150, totalFrames: 100, phase: .rendering).percentage, 100)
+    }
+
+    func testSavingCarriesFrameTotals() {
+        let prev = ExportProgress.make(currentFrame: 90, totalFrames: 120, phase: .finalizing)
+        let saving = ExportProgress.saving(previous: prev)
+        XCTAssertEqual(saving.percentage, 100)
+        XCTAssertEqual(saving.phase, .saving)
+        XCTAssertEqual(saving.totalFrames, 120)
+        XCTAssertEqual(saving.currentFrame, 120)
+        XCTAssertEqual(saving.estimatedTimeRemaining, 0)
+        // Nil previous falls back to 1 frame.
+        XCTAssertEqual(ExportProgress.saving(previous: nil).totalFrames, 1)
+    }
+}
+
 final class RecordingClockTests: XCTestCase {
     func testElapsedGrowsWhileRunning() {
         var c = RecordingClock()
