@@ -198,6 +198,42 @@ final class WhisperTranscriberTests: XCTestCase {
     }
 }
 
+final class CaptionEditingTests: XCTestCase {
+    func testNormalizeCollapsesWhitespace() {
+        XCTAssertEqual(CaptionEditing.normalizeText("  hello   world \n"), "hello world")
+        XCTAssertEqual(CaptionEditing.normalizeText("one\t\ttwo"), "one two")
+        XCTAssertEqual(CaptionEditing.normalizeText("   "), "")
+    }
+
+    func testBuildWordsDistributesEvenly() {
+        let words = CaptionEditing.buildWords(text: "a b c", startMs: 0, endMs: 3000)
+        XCTAssertEqual(words.count, 3)
+        XCTAssertEqual(words.map(\.text), ["a", "b", "c"])
+        XCTAssertEqual(words[0].startMs, 0); XCTAssertEqual(words[0].endMs, 1000)
+        XCTAssertEqual(words[1].startMs, 1000); XCTAssertEqual(words[1].endMs, 2000)
+        XCTAssertEqual(words[2].startMs, 2000); XCTAssertEqual(words[2].endMs, 3000)
+        // First word has no leading space; the rest do.
+        XCTAssertFalse(words[0].leadingSpace)
+        XCTAssertTrue(words[1].leadingSpace)
+    }
+
+    func testBuildWordsMonotonicNonOverlapping() {
+        let words = CaptionEditing.buildWords(text: "the quick brown fox jumps", startMs: 500, endMs: 900)
+        XCTAssertEqual(words.count, 5)
+        for i in words.indices {
+            XCTAssertGreaterThanOrEqual(words[i].endMs, words[i].startMs + 1, "each word ≥ 1ms")
+            if i > 0 { XCTAssertGreaterThanOrEqual(words[i].startMs, words[i - 1].startMs, "monotonic") }
+        }
+        XCTAssertEqual(words.last?.endMs, 900, "last word ends at the cue end")
+    }
+
+    func testBuildWordsEmptyAndSingle() {
+        XCTAssertTrue(CaptionEditing.buildWords(text: "   ", startMs: 0, endMs: 1000).isEmpty)
+        let one = CaptionEditing.buildWords(text: "hi", startMs: 0, endMs: 500)
+        XCTAssertEqual(one, [CaptionWord(text: "hi", startMs: 0, endMs: 500, leadingSpace: false)])
+    }
+}
+
 final class EditorHistoryTests: XCTestCase {
     func testRecordInitializeUnchangedAndRecorded() {
         var h = EditorHistory<String>()
