@@ -4,6 +4,21 @@ import ImageIO
 import UniformTypeIdentifiers
 import CoreGraphics
 
+/// GIF output size presets (Recordly parity).
+enum GifSize: String, CaseIterable, Identifiable {
+    case medium = "720p"
+    case large = "1080p"
+    case original = "Original"
+    var id: String { rawValue }
+    var maxWidth: CGFloat {
+        switch self {
+        case .medium: return 720
+        case .large: return 1080
+        case .original: return 100_000
+        }
+    }
+}
+
 /// Renders the styled composition to an animated GIF using AVAssetImageGenerator + ImageIO.
 enum GifExport {
 

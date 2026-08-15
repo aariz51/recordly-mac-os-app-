@@ -137,4 +137,16 @@ final class ParityFeatureTests: XCTestCase {
                                       webcam: frames, webcamSettings: wc)
         try await assertValid(out)
     }
+
+    func testGifSizePresetCapsWidth() async throws {
+        let src = tmp("gs-src.mp4"); try await makeVideo(src, size: CGSize(width: 1600, height: 1000))
+        let out = tmp("gs.gif")
+        try await GifExport.export(source: src, to: out, style: StyleOptions(),
+                                   fps: 6, maxWidth: GifSize.medium.maxWidth)
+        let s = CGImageSourceCreateWithURL(out as CFURL, nil)!
+        let props = CGImageSourceCopyPropertiesAtIndex(s, 0, nil) as? [CFString: Any]
+        let w = (props?[kCGImagePropertyPixelWidth] as? Int) ?? 0
+        XCTAssertLessThanOrEqual(w, 720, "720p preset caps width, got \(w)")
+        XCTAssertGreaterThan(w, 100)
+    }
 }
