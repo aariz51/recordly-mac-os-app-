@@ -106,6 +106,13 @@ final class CaptureIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(reencDur, 0.5, "re-encode of real footage should be valid")
     }
 
+    // NOTE: Window capture (`.window` source / `availableWindows()`) can't run in the
+    // headless XCTest runner — it needs a window-server-connected process and aborts with
+    // `CGS_REQUIRE_INIT` otherwise. It shares the exact append/writer path proven by the
+    // display-capture tests (only the SCContentFilter differs) and is exercised by the
+    // live .app (which offers a Window source toggle and runs window-server-connected).
+    // Verified there rather than here to avoid crashing the suite.
+
     /// Records with the cursor sampler running, then exports with the cursor track + a
     /// blur annotation + a burned-in caption — the full overlay stack on real footage.
     @MainActor
