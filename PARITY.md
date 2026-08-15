@@ -61,7 +61,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Feature | Reclip | Note |
 |---|---|---|
 | Text captions | ✅ | Annotations |
-| **Full text typography (font/size/style/align/color/bg/radius)** | ❌ | fixed style |
+| **Text typography (weight/color/bg toggle+color)** | ✅ | weight, text colour, pill on/off + colour (font-family/align still fixed) |
 | Image annotations | ✅ | Annotation.kind=.image |
 | Arrow annotations (stroke, color) | ✅ | Annotation.kind=.arrow (1 dir; 8-dir TODO) |
 | Blur / censor region | ✅ | Annotation.kind=.blur/.box |
@@ -87,7 +87,7 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 | Margin | ✅ | batch 1 |
 | **React-to-zoom scaling** | ❌ | — |
 | **Independent width + height** | ✅ | WebcamSettings.aspectRatio |
-| **9-cell position + custom X/Y** | 🟡 | 4 corners |
+| **9-cell position + custom X/Y** | ✅ | full 9-cell grid (custom X/Y still open) |
 | **Crop control** | ❌ | — |
 | **Upload / replace / remove footage** | ❌ | live only |
 | **Time-offset alignment** | ❌ | — |
@@ -104,7 +104,7 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 | **Image wallpaper (user upload)** | ✅ | `StyleOptions.backgroundImage` — aspect-filled, persisted in `.reclip` (own JPEGs not copied for licensing) |
 | **Device frames** | ✅ | `DeviceFrameRenderer` — macOS window + browser chrome (traffic lights, address pill) |
 | **Aspect ratio presets (8 + custom)** | 🟡 | 5 presets (batch 2) |
-| **Advanced per-side / vertical padding** | ❌ | — |
+| **Advanced per-side / vertical padding** | ✅ | `PaddingInsets` (top/bottom/left/right), content-rect compositing |
 
 ## 7. Auto-captions  🟡 (rendering half landed)
 Reclip now renders styled burned-in caption pills, exports **SRT + VTT** sidecars,
@@ -121,7 +121,7 @@ library instead of a subprocess.
 |---|---|---|
 | MP4 (H.264/AAC) | ✅ | StyledExport |
 | GIF | ✅ | GifExport |
-| MP4 quality (4 levels) | 🟡 | 3 levels (batch 1) |
+| MP4 quality (4 levels) | ✅ | Source/High/Medium/Low + resolution-aware bitrate |
 | **MP4 frame rate (24/30/60)** | ✅ | `exportReencoded` — AVAssetReader→AVAssetWriter with slot-based resampling (drops/dups frames); verified by counting real output frames |
 | **Resolution-aware bitrate tiers** | ✅ | `ExportBitrate` mirrors Recordly's 10/20/30M tiers + quality multiplier + 2M floor; applied via AVVideoAverageBitRateKey in the re-encode path |
 | **Temporal motion blur** | ✅ | `MotionBlur` — exact port of Recordly's config/sample-plan (odd sample count, shutter fraction, cosine-tapered weights summing to 1) + weighted frame blend wired into the re-encode path |
