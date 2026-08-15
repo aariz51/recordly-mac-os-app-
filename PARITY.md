@@ -139,9 +139,30 @@ prefs + named presets, rebindable keyboard shortcuts + reference, auto-update, t
 
 ---
 
-## Engine work completed so far (this session, original Swift)
+## Engine work completed so far (original Swift)
 - Batch 1: cursor show/hide, webcam mirror/roundness/shadow/margin, GIF loop, MP4 quality.
 - Batch 2: background blur (blurred-source), aspect-ratio presets + output canvas.
+- Batch 3 (deep parity sweep — pure logic ported line-by-line from Recordly, 91 tests):
+  - **Engine/export:** temporal motion blur (`MotionBlur`), MP4 frame-rate 24/30/60 via
+    AVAssetWriter re-encode + resampling, resolution-aware bitrate (`ExportBitrate`),
+    aspect-canvas sizing fix (`ExportDimensions`, was upscaling), 3-layer shadow.
+  - **Capture logic:** `RecordingClock` (pause/resume, wired live) + `Countdown`.
+  - **Editor logic:** `EditorHistory` (undo/redo), `ExportProgress` phases, `DocumentState`
+    (dirty tracking).
+  - **Captions:** Whisper pipeline + `WhisperLanguage`/`WhisperModel` + `CaptionEditing`
+    (word-level timing).
+  - **Timing:** `MediaTiming` (clamp/duration).
+  - **Animation math:** `MotionSmoothing` (damped-spring cursor+zoom smoothing), `CursorSway`,
+    `CursorClickEffect` (bounce+ripple), `ZoomTransform` (invertible camera geometry).
+
+### Remaining is no longer un-ported pure logic — it is one of:
+- **Redundant** with existing tested code (Recordly's zoomRegionUtils ≈ `ZoomTimeline`,
+  gifExporter ≈ `GifExport`, webcamOverlay ≈ `WebcamOverlay`) — re-porting would risk regressions.
+- **Not applicable** (WebCodecs/muxer/decoder browser plumbing subsumed by AVFoundation).
+- **UI-dev's active lane** (timeline model, drag-drop, preview player, editor preferences).
+- **Capture-hardware-gated** (device pickers, meters, HUD, click telemetry — need a live recording).
+- **Visual tuning + wiring** (the ported animation math needs your eyes on feel, then hookup).
+- **Subsystem-scale** (extensions/marketplace, 9-locale i18n).
 
 ## Prioritized engine roadmap (feasible, high-value first)
 1. Manual zoom regions add/edit API (model exists) + zoom depth presets & easing
