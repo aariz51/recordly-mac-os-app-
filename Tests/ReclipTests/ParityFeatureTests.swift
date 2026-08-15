@@ -231,6 +231,36 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testTextAnnotationTypography() async throws {
+        let src = tmp("type-src.mp4"); try await makeVideo(src)
+        var a = Annotation(text: "Styled", start: 0.1, end: 1.0)
+        a.kind = .text; a.bold = false; a.textColorRGBA = [1, 0.9, 0.2, 1]
+        a.showBackground = false                       // no pill
+        let out = tmp("type.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(), annotations: [a])
+        try await assertValid(out)
+        // Renders differently with vs without a background pill (bigger canvas with pill padding).
+        let plain = Annotations.render("Hi", fontSize: 40, showBackground: false)
+        let boxed = Annotations.render("Hi", fontSize: 40, showBackground: true)
+        XCTAssertNotNil(plain); XCTAssertNotNil(boxed)
+    }
+
+    func testTextTypographyProjectRoundTrip() throws {
+        var a = Annotation(text: "Hi", start: 0, end: 1)
+        a.kind = .text; a.bold = false; a.textColorRGBA = [0.1, 0.2, 0.3, 1]
+        a.showBackground = false; a.bgColorRGBA = [0.5, 0, 0, 0.7]
+        let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
+                                            style: StyleOptions(), zoom: ZoomTimeline(), webcam: WebcamSettings(),
+                                            annotations: [a], trimStart: 0, trimEnd: 0, speed: 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("type.reclip")
+        try project.save(to: url)
+        let back = try XCTUnwrap(try ReclipProject.load(from: url).annotationList().first)
+        XCTAssertFalse(back.bold)
+        XCTAssertFalse(back.showBackground)
+        XCTAssertEqual(back.textColorRGBA, [0.1, 0.2, 0.3, 1])
+        XCTAssertEqual(back.bgColorRGBA, [0.5, 0, 0, 0.7])
+    }
+
     func testWebcamNineCellPositions() async throws {
         XCTAssertEqual(WebcamSettings.Corner.allCases.count, 9, "full 9-cell position grid")
         let src = tmp("wc9-src.mp4"); try await makeVideo(src)

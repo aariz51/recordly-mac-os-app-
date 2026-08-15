@@ -80,6 +80,10 @@ struct ReclipProject: Codable, Equatable {
         var blurRadius: Double = 24
         var color: [Double] = [0, 0, 0, 0.85]
         var imageB64: String? = nil
+        var bold: Bool = true
+        var textColor: [Double] = [1, 1, 1, 1]
+        var showBg: Bool = true
+        var bgColor: [Double] = [0, 0, 0, 0.55]
     }
 
     // MARK: Capture / restore
@@ -113,7 +117,8 @@ struct ReclipProject: Codable, Equatable {
                 Cap(text: $0.text, start: $0.start, end: $0.end, x: $0.position.x, y: $0.position.y,
                     fontFraction: $0.fontFraction, kind: $0.kind.rawValue,
                     rw: $0.regionSize.width, rh: $0.regionSize.height, blurRadius: $0.blurRadius,
-                    color: $0.colorRGBA, imageB64: $0.imageData?.base64EncodedString())
+                    color: $0.colorRGBA, imageB64: $0.imageData?.base64EncodedString(),
+                    bold: $0.bold, textColor: $0.textColorRGBA, showBg: $0.showBackground, bgColor: $0.bgColorRGBA)
             },
             cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size),
             captionCues: captionCues.map { CueDTO(text: $0.text, start: $0.start, end: $0.end) },
@@ -165,6 +170,10 @@ struct ReclipProject: Codable, Equatable {
             a.blurRadius = c.blurRadius
             a.colorRGBA = c.color
             a.imageData = c.imageB64.flatMap { Data(base64Encoded: $0) }
+            a.bold = c.bold
+            a.textColorRGBA = c.textColor
+            a.showBackground = c.showBg
+            a.bgColorRGBA = c.bgColor
             return a
         }
     }

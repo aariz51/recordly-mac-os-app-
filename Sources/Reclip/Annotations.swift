@@ -22,6 +22,11 @@ struct Annotation: Identifiable, Equatable {
     var blurRadius: Double = 24                          // for .blur
     var colorRGBA: [Double] = [0, 0, 0, 0.85]            // for .box fill / .arrow stroke
     var imageData: Data? = nil                           // for .image
+    // Text typography (defaulted to the previous fixed style for compatibility):
+    var bold: Bool = true
+    var textColorRGBA: [Double] = [1, 1, 1, 1]           // text fill (default white)
+    var showBackground: Bool = true                      // the rounded pill behind the text
+    var bgColorRGBA: [Double] = [0, 0, 0, 0.55]          // pill colour
 }
 
 /// An annotation with any pre-rendered image (text/image kinds); region kinds render live.
@@ -34,12 +39,19 @@ struct RenderedAnnotation {
 enum Annotations {
 
     /// Render caption text to a detached CIImage using Core Text (thread-safe, no AppKit context).
-    static func render(_ text: String, fontSize: CGFloat) -> (CIImage, CGSize)? {
+    static func render(_ text: String, fontSize: CGFloat,
+                       bold: Bool = true,
+                       textColor: [Double] = [1, 1, 1, 1],
+                       showBackground: Bool = true,
+                       bgColor: [Double] = [0, 0, 0, 0.55]) -> (CIImage, CGSize)? {
         guard !text.isEmpty else { return nil }
-        let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, fontSize, nil)
+        let font = CTFontCreateWithName((bold ? "HelveticaNeue-Bold" : "HelveticaNeue") as CFString, fontSize, nil)
+        func color(_ c: [Double]) -> CGColor {
+            CGColor(red: c[0], green: c[1], blue: c[2], alpha: c.count > 3 ? c[3] : 1)
+        }
         let attrs: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: NSColor.white.cgColor
+            .foregroundColor: color(textColor)
         ]
         let attributed = NSAttributedString(string: text, attributes: attrs)
         let line = CTLineCreateWithAttributedString(attributed)
@@ -54,13 +66,15 @@ enum Annotations {
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8,
                                   bytesPerRow: 0, space: cs,
                                   bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
-        // rounded translucent pill behind the text
-        let rect = CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h))
-        let path = CGPath(roundedRect: rect, cornerWidth: CGFloat(h) * 0.28,
-                          cornerHeight: CGFloat(h) * 0.28, transform: nil)
-        ctx.addPath(path)
-        ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.55))
-        ctx.fillPath()
+        // rounded pill behind the text (optional)
+        if showBackground {
+            let rect = CGRect(x: 0, y: 0, width: CGFloat(w), height: CGFloat(h))
+            let path = CGPath(roundedRect: rect, cornerWidth: CGFloat(h) * 0.28,
+                              cornerHeight: CGFloat(h) * 0.28, transform: nil)
+            ctx.addPath(path)
+            ctx.setFillColor(color(bgColor))
+            ctx.fillPath()
+        }
 
         ctx.textPosition = CGPoint(x: padX, y: padY - bounds.minY)
         CTLineDraw(line, ctx)
@@ -74,7 +88,9 @@ enum Annotations {
             switch a.kind {
             case .text:
                 let fontSize = canvas.height * a.fontFraction
-                guard let (image, size) = render(a.text, fontSize: fontSize) else { return nil }
+                guard let (image, size) = render(a.text, fontSize: fontSize, bold: a.bold,
+                                                 textColor: a.textColorRGBA, showBackground: a.showBackground,
+                                                 bgColor: a.bgColorRGBA) else { return nil }
                 return RenderedAnnotation(annotation: a, image: image, pixelSize: size)
             case .image:
                 guard let data = a.imageData, let ci = CIImage(data: data) else { return nil }
