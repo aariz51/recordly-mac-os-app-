@@ -98,7 +98,7 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 | Solid (15 swatches) | ✅ | `BackgroundPresets` — 16-preset gallery (gradients + solids), all original colours |
 | Gradient (24 presets) | ✅ | `BackgroundPresets` gradient set (original, App-Store-clean) |
 | Padding | ✅ | linked only (no per-side) |
-| Rounded corners | ✅ | (no squircle) |
+| Rounded corners | ✅ | circular + **squircle** (superellipse) toggle; pixel-verified |
 | Drop shadow | ✅ | 3-layer (VIDEO_SHADOW_LAYER_PROFILES) |
 | **Background blur (blurred source)** | ✅ | batch 2 |
 | **Image wallpaper (user upload)** | ✅ | `StyleOptions.backgroundImage` — aspect-filled, persisted in `.reclip` (own JPEGs not copied for licensing) |
