@@ -1,4 +1,5 @@
 import Foundation
+import CoreImage
 
 /// Extension system foundation — the manifest model + permission gating, ported from
 /// Recordly's `lib/extensions/types.ts` + `extensionHost.ts` register-gating.
@@ -8,8 +9,8 @@ import Foundation
 /// runtime** (App Store Review §2.5.2) — the same class of constraint that ruled out the
 /// AGPL App Store path — so the dynamic-JS-loading and marketplace layers are deliberately
 /// out of scope. What is portable and useful is the manifest schema + permission model a
-/// *built-in / curated* contribution system would share; that is what this implements and
-/// tests.
+/// *built-in / curated* contribution system would share, plus the render-hook pipeline that
+/// lets a built-in extension transform frames; that is what this implements and tests.
 enum ExtensionPermission: String, Codable, CaseIterable {
     case render    // hook the frame render pipeline
     case cursor    // cursor telemetry & effects
@@ -87,5 +88,58 @@ struct ExtensionRegistry {
         guard manifest.hasPermission(p) else {
             throw ExtensionRegistryError.permissionDenied(p, action: action)
         }
+    }
+}
+
+// MARK: - Render-hook runtime
+//
+// The pipeline-integration layer (Recordly's `renderHooks.ts` + `extensionHost` render
+// dispatch): a built-in extension declares the `render` permission and transforms the frame
+// at one of the defined phases. The compositor calls `ExtensionHost.apply` at each phase.
+
+/// The phase in the render pipeline a hook runs at (Recordly's RenderHookPhase).
+enum RenderHookPhase: String, Codable, CaseIterable {
+    case background      // before the video frame (custom backdrops)
+    case postVideo       // after the source frame, before zoom
+    case postZoom        // after the zoom transform
+    case postCursor      // after the cursor is drawn
+    case postWebcam      // after the webcam overlay
+    case postAnnotations // after annotations
+    case final           // last pass (watermarks, HUD)
+}
+
+struct RenderHookContext { var time: Double; var canvas: CGSize }
+
+/// A loaded extension. `renderHook` transforms the frame at a phase (default: passthrough).
+protocol ReclipExtension {
+    var manifest: ExtensionManifest { get }
+    func renderHook(_ image: CIImage, phase: RenderHookPhase, context: RenderHookContext) -> CIImage
+}
+extension ReclipExtension {
+    func renderHook(_ image: CIImage, phase: RenderHookPhase, context: RenderHookContext) -> CIImage { image }
+}
+
+/// Registry of loaded extensions; dispatches render hooks (permission-gated to `.render`).
+final class ExtensionHost {
+    static let shared = ExtensionHost()
+    private(set) var extensions: [ReclipExtension] = []
+
+    func register(_ ext: ReclipExtension) {
+        guard !extensions.contains(where: { $0.manifest.id == ext.manifest.id }) else { return }
+        extensions.append(ext)
+    }
+    func unregister(id: String) { extensions.removeAll { $0.manifest.id == id } }
+    func hasHooks(for phase: RenderHookPhase) -> Bool {
+        extensions.contains { $0.manifest.hasPermission(.render) }
+    }
+
+    /// Runs each render-permitted extension's hook for `phase`, in registration order.
+    static func apply(_ image: CIImage, phase: RenderHookPhase, context: RenderHookContext,
+                      extensions: [ReclipExtension]) -> CIImage {
+        var img = image
+        for ext in extensions where ext.manifest.hasPermission(.render) {
+            img = ext.renderHook(img, phase: phase, context: context)
+        }
+        return img
     }
 }

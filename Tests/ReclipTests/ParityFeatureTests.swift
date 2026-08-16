@@ -853,6 +853,58 @@ final class ParityFeatureTests: XCTestCase {
                       "sidecar of a valid recording kept")
     }
 
+    /// A sample extension that tints the frame, to exercise the render-hook runtime.
+    private struct TintExtension: ReclipExtension {
+        let manifest = ExtensionManifest(id: "com.test.tint", name: "Tint", version: "1.0.0",
+                                         description: "test tint", author: nil, homepage: nil,
+                                         license: nil, engine: nil, icon: nil, main: "index",
+                                         permissions: [.render])
+        func renderHook(_ image: CIImage, phase: RenderHookPhase, context: RenderHookContext) -> CIImage {
+            guard phase == .final else { return image }
+            let f = CIFilter.colorMatrix()
+            f.inputImage = image
+            f.rVector = CIVector(x: 1, y: 0, z: 0, w: 0)
+            f.gVector = CIVector(x: 0, y: 0, z: 0, w: 0)   // drop green
+            f.bVector = CIVector(x: 0, y: 0, z: 0, w: 0)   // drop blue → red-only
+            return f.outputImage ?? image
+        }
+    }
+
+    func testExtensionHostRegistrationAndPermissions() {
+        let host = ExtensionHost()
+        host.register(TintExtension())
+        host.register(TintExtension())                      // duplicate id ignored
+        XCTAssertEqual(host.extensions.count, 1)
+        XCTAssertTrue(host.hasHooks(for: .final))
+        host.unregister(id: "com.test.tint")
+        XCTAssertEqual(host.extensions.count, 0)
+        XCTAssertEqual(RenderHookPhase.allCases.count, 7)   // Recordly's 7 phases
+        XCTAssertEqual(ExtensionPermission.allCases.count, 7)
+    }
+
+    func testExtensionRenderHookModifiesFrame() {
+        // The tint extension drops green+blue at the .final phase → a grey frame goes red.
+        let base = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 40, height: 40))
+        let out = ExtensionHost.apply(base, phase: .final,
+                                      context: RenderHookContext(time: 0, canvas: CGSize(width: 40, height: 40)),
+                                      extensions: [TintExtension()])
+        let ctx = CIContext()
+        var px = [UInt8](repeating: 0, count: 4)
+        ctx.render(out, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: 20, y: 20, width: 1, height: 1),
+                   format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+        XCTAssertGreaterThan(Int(px[0]), 100, "red channel preserved")
+        XCTAssertLessThan(Int(px[1]), 40, "green dropped by the extension")
+        XCTAssertLessThan(Int(px[2]), 40, "blue dropped by the extension")
+    }
+
+    func testExtensionExportRuns() async throws {
+        let src = tmp("ext-src.mp4"); try await makeVideo(src)
+        let out = tmp("ext.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(), extensions: [TintExtension()])
+        try await assertValid(out)
+    }
+
     func testDeviceFrameExports() async throws {
         let src = tmp("frame-src.mp4"); try await makeVideo(src)
         for frame in [DeviceFrame.macOS, .browser] {

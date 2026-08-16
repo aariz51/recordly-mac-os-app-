@@ -212,7 +212,8 @@ enum StyledExport {
                              cursor: CursorTrack? = nil,
                              cursorStyle: CursorStyle = CursorStyle(),
                              captions: [CaptionCue] = [],
-                             captionSettings: CaptionSettings = CaptionSettings()) async throws -> StyledTimeline {
+                             captionSettings: CaptionSettings = CaptionSettings(),
+                             extensions: [ReclipExtension] = []) async throws -> StyledTimeline {
         let srcAsset = AVURLAsset(url: source)
         guard let vTrack = try await srcAsset.loadTracks(withMediaType: .video).first else {
             throw StyledExportError.noVideoTrack
@@ -338,8 +339,13 @@ enum StyledExport {
             let background = blur > 0.01
                 ? blurredFill(frame, canvas: canvas, intensity: CGFloat(blur))
                 : staticBackground
+            // Extension render hooks fire at defined pipeline phases (permission-gated).
+            let ctx = RenderHookContext(time: srcT, canvas: canvas)
+            func ext(_ img: CIImage, _ phase: RenderHookPhase) -> CIImage {
+                extensions.isEmpty ? img : ExtensionHost.apply(img, phase: phase, context: ctx, extensions: extensions)
+            }
             let z = zoom.value(at: srcT)
-            let zoomed = applyZoom(frame, scale: z.scale, focus: z.focus, canvas: canvas)
+            let zoomed = ext(applyZoom(ext(frame, .postVideo), scale: z.scale, focus: z.focus, canvas: canvas), .postZoom)
             let framed = DeviceFrameRenderer.apply(zoomed, frame: style.deviceFrame)
             let composed = compose(source: framed,
                                    background: background,
@@ -350,14 +356,14 @@ enum StyledExport {
                                    shadowOpacity: style.shadowOpacity,
                                    shadowRadius: style.shadowRadius,
                                    context: ciContext)
-            let withCam = WebcamOverlay.composite(base: composed, canvas: canvas,
-                                                  webcam: webcam, time: srcT, settings: webcamSettings,
-                                                  zoomScale: z.scale)
-            let withText = Annotations.composite(base: withCam, canvas: canvas,
-                                                 rendered: renderedAnnotations, time: srcT)
+            let withCam = ext(WebcamOverlay.composite(base: composed, canvas: canvas,
+                                                      webcam: webcam, time: srcT, settings: webcamSettings,
+                                                      zoomScale: z.scale), .postWebcam)
+            let withText = ext(Annotations.composite(base: withCam, canvas: canvas,
+                                                     rendered: renderedAnnotations, time: srcT), .postAnnotations)
             let withCaptions = CaptionRenderer.composite(base: withText, canvas: canvas,
                                                          cues: captions, time: srcT, settings: captionSettings)
-            request.finish(with: withCaptions, context: nil)
+            request.finish(with: ext(withCaptions, .final), context: nil)
         }
         video.renderSize = canvas
 
@@ -513,13 +519,15 @@ enum StyledExport {
                        cursorStyle: CursorStyle = CursorStyle(),
                        captions: [CaptionCue] = [],
                        captionSettings: CaptionSettings = CaptionSettings(),
+                       extensions: [ReclipExtension] = [],
                        progress: (@Sendable (Double) -> Void)? = nil) async throws {
         let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
                                         webcam: webcam, webcamSettings: webcamSettings,
                                         annotations: annotations, trim: trim, speed: speed,
                                         speedRegions: speedRegions, keepRanges: keepRanges,
                                         cursor: cursor, cursorStyle: cursorStyle,
-                                        captions: captions, captionSettings: captionSettings)
+                                        captions: captions, captionSettings: captionSettings,
+                                        extensions: extensions)
         guard let export = AVAssetExportSession(asset: tl.asset, presetName: quality.preset) else {
             throw StyledExportError.exportSessionFailed("could not create export session")
         }
