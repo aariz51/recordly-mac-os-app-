@@ -65,7 +65,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Image annotations | ✅ | Annotation.kind=.image |
 | Arrow annotations (stroke, color, 8-dir) | ✅ | Annotation.kind=.arrow + arrowAngle (any direction) |
 | Blur / censor region | ✅ | Annotation.kind=.blur/.box |
-| **Audio mute + volume gain** ✅ / per-region + normalize | 🟡 | global mute + 0–2x volume (AVAudioMix, RMS-verified); per-region/normalize open |
+| **Audio mute + volume + normalize** | ✅ | mute, 0–2x volume, peak-normalize (AVAudioMix, RMS-verified); per-region volume still open |
 
 ## 4. Cursor polish engine  🟡 (v1 landed)
 Reclip now renders a stylized cursor (arrow/dot) from the tracked path with smooth
