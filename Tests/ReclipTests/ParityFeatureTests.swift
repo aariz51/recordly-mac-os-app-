@@ -334,11 +334,15 @@ final class ParityFeatureTests: XCTestCase {
         await w.finishWriting()
     }
 
-    /// Decodes a file's audio and returns its RMS level (0 if no audio).
-    private func audioRMS(_ url: URL) async throws -> Double {
+    /// Decodes a file's audio and returns its RMS level (0 if no audio), optionally windowed.
+    private func audioRMS(_ url: URL, from: Double? = nil, to: Double? = nil) async throws -> Double {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .audio).first else { return 0 }
         let reader = try AVAssetReader(asset: asset)
+        if let from, let to {
+            reader.timeRange = CMTimeRange(start: CMTime(seconds: from, preferredTimescale: 600),
+                                           duration: CMTime(seconds: to - from, preferredTimescale: 600))
+        }
         let out = AVAssetReaderTrackOutput(track: track, outputSettings: [
             AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16,
             AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
@@ -368,6 +372,18 @@ final class ParityFeatureTests: XCTestCase {
         let quietRMS = try await audioRMS(quietURL)
         XCTAssertGreaterThan(loudRMS, 100, "full-volume export should carry an audible tone")
         XCTAssertLessThan(quietRMS, loudRMS * 0.6, "0.25 gain should be clearly quieter than 1.0")
+    }
+
+    func testAudioVolumeRegionsDuckFirstHalf() async throws {
+        // 2s tone; duck the first 1s to near-silent, keep the second 1s at full.
+        let src = tmp("avr-src.mp4"); try await makeVideoWithAudio(src, seconds: 2.0, tone: true)
+        var s = StyleOptions(); s.audioVolumeRegions = [AudioVolumeRegion(start: 0, end: 1.0, volume: 0.05)]
+        let out = tmp("avr.mp4")
+        try await StyledExport.export(source: src, to: out, style: s)
+        let firstRMS = try await audioRMS(out, from: 0.1, to: 0.9)
+        let secondRMS = try await audioRMS(out, from: 1.1, to: 1.9)
+        XCTAssertGreaterThan(secondRMS, 50, "second half stays audible")
+        XCTAssertLessThan(firstRMS, secondRMS * 0.5, "first half ducked well below the second")
     }
 
     func testNormalizeAudioBoostsQuietTrack() async throws {

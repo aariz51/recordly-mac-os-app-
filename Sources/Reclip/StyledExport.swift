@@ -71,6 +71,7 @@ struct StyleOptions: Equatable {
     var muteAudio: Bool = false            // drop the source audio from the export
     var audioVolume: Double = 1.0          // 0…2 gain applied to the source audio
     var normalizeAudio: Bool = false       // auto-boost quiet audio toward full scale
+    var audioVolumeRegions: [AudioVolumeRegion] = []   // per-region volume overrides (composition time)
     var maxOutputHeight: Int? = nil        // cap output height (e.g. 1080/720); width scales with it
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
@@ -365,13 +366,35 @@ enum StyledExport {
             if style.normalizeAudio {
                 gain *= await Self.normalizationGain(for: srcAsset, range: srcRange)
             }
-            if abs(gain - 1.0) > 0.001 {
+            let baseGain = Float(max(0, min(gain, 4.0)))
+            if abs(gain - 1.0) > 0.001 || !style.audioVolumeRegions.isEmpty {
                 let audioTracks = comp.tracks(withMediaType: .audio)
                 if !audioTracks.isEmpty {
+                    let regions = style.audioVolumeRegions.sorted { $0.start < $1.start }
+                    let total = comp.duration.seconds
+                    // Build a gap-filled volume timeline (base between regions) so volume
+                    // reverts after each region instead of holding its last value.
+                    var segs: [(Double, Double, Float)] = []
+                    var cursor = 0.0
+                    for r in regions where r.end > r.start {
+                        let rs = Swift.max(cursor, r.start), re = Swift.min(total, r.end)
+                        if re <= rs { continue }
+                        if rs > cursor { segs.append((cursor, rs, baseGain)) }
+                        segs.append((rs, re, Float(max(0, min(gain * r.volume, 4.0)))))
+                        cursor = re
+                    }
+                    if cursor < total { segs.append((cursor, total, baseGain)) }
+
                     let mix = AVMutableAudioMix()
                     mix.inputParameters = audioTracks.map { track in
                         let p = AVMutableAudioMixInputParameters(track: track)
-                        p.setVolume(Float(max(0, min(gain, 4.0))), at: .zero)
+                        p.setVolume(baseGain, at: .zero)
+                        for (s, e, v) in segs {
+                            p.setVolumeRamp(fromStartVolume: v, toEndVolume: v,
+                                            timeRange: CMTimeRange(
+                                                start: CMTime(seconds: s, preferredTimescale: 600),
+                                                duration: CMTime(seconds: e - s, preferredTimescale: 600)))
+                        }
                         return p
                     }
                     audioMix = mix

@@ -7,6 +7,13 @@ struct SpeedSegment: Equatable, Codable {
     var speed: Double
 }
 
+/// A timeline region with an audio volume override (0…2), in composition time.
+struct AudioVolumeRegion: Equatable, Codable {
+    var start: Double
+    var end: Double
+    var volume: Double
+}
+
 /// Maps output time ↔ source time when middle segments have been cut out (kept ranges
 /// concatenated). Lets the compositor keep overlays (keyed to source time) in sync with a
 /// cut timeline. Built from the list of surviving source ranges, in output order.
