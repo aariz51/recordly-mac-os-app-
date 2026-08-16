@@ -47,14 +47,14 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 |---|---|---|
 | Trim | ✅ | StyledExport trim |
 | **Split clip** | ❌ | — |
-| **Clip model (per-clip speed grid, mute, volume, normalize)** | ❌ | single clip only |
+| **Clip model (per-clip speed grid, mute, volume, normalize)** | 🟡 | speed regions + mute + volume landed; split/normalize open |
 | **Undo / redo** | ✅ | `EditorHistory` — bounded 100-entry stack, redo-clear on new edit, initialized/applied/unchanged/recorded results; unit-tested (UI keybinding pending) |
 | **Drag/resize regions on a timeline** | ❌ | UI (UI dev) |
 | Auto zoom (cursor) | ✅ | ZoomTimeline.autoZoom |
 | **Manual zoom regions (add/edit)** | ✅ | ZoomTimeline.addRegion + depth presets |
 | Zoom depth presets (6) + manual focus + easing (4 curves) | ✅ | ZoomDepth + ZoomEasing |
 | Zoom connect-neighbors ✅ / motion-blur tuning | 🟡 | `connectNeighbors(maxGap:)` merges regions (tested); temporal motion-blur still open |
-| **Speed regions (per-segment)** | 🟡 | global speed only |
+| **Speed regions (per-segment)** | ✅ | `SpeedMap` piecewise mapping wired into compositor (scaleTimeRange + synced overlays); duration-verified |
 | **Playback controls (play/pause/skip/volume)** | 🟡 | preview loops; no scrub UI |
 
 ## 3. Annotations
