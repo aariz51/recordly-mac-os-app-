@@ -27,6 +27,16 @@ enum RecordingValidator {
         return .valid(duration: dur.seconds)
     }
 
+    /// Removes a recording and all of its sidecars — used when the user discards a take.
+    static func discard(_ movie: URL) {
+        let fm = FileManager.default
+        let base = movie.deletingPathExtension()
+        for ext in ["mp4", "cursor", "reclip"] {
+            try? fm.removeItem(at: base.appendingPathExtension(ext))
+        }
+        try? fm.removeItem(at: WebcamRecorder.sidecarURL(for: movie))
+    }
+
     /// Removes incomplete recordings (empty/unreadable/no-video) and orphaned sidecars
     /// (`.cursor` / `.reclip` with no surviving movie). Returns the URLs removed.
     @discardableResult

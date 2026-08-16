@@ -555,6 +555,22 @@ final class ParityFeatureTests: XCTestCase {
         for u in [good, empty, junk] { try? FileManager.default.removeItem(at: u) }
     }
 
+    func testDiscardRemovesRecordingAndSidecars() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("reclip-discard-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let movie = dir.appendingPathComponent("Reclip-take.mp4")
+        try await makeVideo(movie)
+        let cursor = movie.deletingPathExtension().appendingPathExtension("cursor")
+        let project = movie.deletingPathExtension().appendingPathExtension("reclip")
+        try "c".data(using: .utf8)!.write(to: cursor)
+        try "p".data(using: .utf8)!.write(to: project)
+        RecordingValidator.discard(movie)
+        for u in [movie, cursor, project] {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: u.path), "\(u.lastPathComponent) should be gone")
+        }
+    }
+
     func testPruneRemovesIncompleteAndOrphans() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("reclip-prune-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

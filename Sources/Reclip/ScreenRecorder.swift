@@ -156,6 +156,20 @@ final class ScreenRecorder: NSObject, ObservableObject {
         isPaused = false
     }
 
+    /// Cancels the current recording and deletes its output + sidecars (no saved take).
+    func discard() async {
+        if let stream { try? await stream.stopCapture(); self.stream = nil }
+        webcamRecorder.stop()
+        _ = cursorSampler.stop()
+        videoInput?.markAsFinished()
+        systemAudioInput?.markAsFinished()
+        micInput?.markAsFinished()
+        if let writer { await writer.finishWriting() }
+        let url = outputURL
+        cleanup()
+        if let url { RecordingValidator.discard(url) }
+    }
+
     func stop() async throws {
         guard isRecording, let stream else { throw RecorderError.notRecording }
         try await stream.stopCapture()
