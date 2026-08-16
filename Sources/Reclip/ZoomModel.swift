@@ -66,6 +66,26 @@ struct ZoomTimeline: Equatable {
         return region
     }
 
+    /// Merges regions separated by a gap ≤ `maxGap` into one continuous region, so the
+    /// camera stays zoomed across quick successions instead of popping out and back in
+    /// (Recordly's "connect neighbors"). The merged region keeps the deeper scale.
+    mutating func connectNeighbors(maxGap: Double = 0.5) {
+        guard regions.count > 1 else { return }
+        let sorted = regions.sorted { $0.start < $1.start }
+        var merged: [ZoomRegion] = [sorted[0]]
+        for r in sorted.dropFirst() {
+            var last = merged[merged.count - 1]
+            if r.start - last.end <= maxGap {
+                last.end = Swift.max(last.end, r.end)
+                if r.scale > last.scale { last.scale = r.scale; last.focus = r.focus }
+                merged[merged.count - 1] = last
+            } else {
+                merged.append(r)
+            }
+        }
+        regions = merged
+    }
+
     /// Returns scale (1 = no zoom) and focus point at time `t`.
     func value(at t: Double) -> (scale: CGFloat, focus: CGPoint) {
         guard let r = regions.first(where: { t >= $0.start && t <= $0.end }) else {

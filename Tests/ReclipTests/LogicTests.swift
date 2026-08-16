@@ -29,6 +29,31 @@ final class ZoomTimelineTests: XCTestCase {
         }
     }
 
+    func testConnectNeighborsMergesCloseRegions() {
+        var tl = ZoomTimeline(regions: [
+            ZoomRegion(start: 0, end: 2, scale: 2.0, focus: CGPoint(x: 0.5, y: 0.5)),
+            ZoomRegion(start: 2.3, end: 4, scale: 2.5, focus: CGPoint(x: 0.2, y: 0.8)),  // gap 0.3 → merge
+            ZoomRegion(start: 6, end: 8, scale: 2.0, focus: CGPoint(x: 0.5, y: 0.5)),     // gap 2 → separate
+        ])
+        tl.connectNeighbors(maxGap: 0.5)
+        XCTAssertEqual(tl.regions.count, 2)
+        XCTAssertEqual(tl.regions[0].start, 0, accuracy: 1e-9)
+        XCTAssertEqual(tl.regions[0].end, 4, accuracy: 1e-9)
+        XCTAssertEqual(Double(tl.regions[0].scale), 2.5, accuracy: 1e-9)   // deeper scale kept
+        XCTAssertEqual(tl.regions[0].focus.x, 0.2, accuracy: 1e-9)         // …and its focus
+        // Far region untouched.
+        XCTAssertEqual(tl.regions[1].start, 6, accuracy: 1e-9)
+    }
+
+    func testConnectNeighborsNoopWhenFarApart() {
+        var tl = ZoomTimeline(regions: [
+            ZoomRegion(start: 0, end: 1, scale: 2, focus: CGPoint(x: 0.5, y: 0.5)),
+            ZoomRegion(start: 5, end: 6, scale: 2, focus: CGPoint(x: 0.5, y: 0.5)),
+        ])
+        tl.connectNeighbors(maxGap: 0.5)
+        XCTAssertEqual(tl.regions.count, 2)
+    }
+
     func testManualRegionWithDepth() {
         var tl = ZoomTimeline()
         tl.addRegion(start: 1, end: 5, depth: .medium, focus: CGPoint(x: 0.3, y: 0.7))
