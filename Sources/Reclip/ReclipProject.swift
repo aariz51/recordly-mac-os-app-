@@ -11,6 +11,7 @@ struct ReclipProject: Codable, Equatable {
     var backgroundImageB64: String? = nil
     var paddingFraction: Double
     var cornerRadiusFraction: Double
+    var squircleCorners: Bool = false
     var shadowOpacity: Double
     var shadowRadius: Double
     var backgroundBlur: Double
@@ -109,6 +110,7 @@ struct ReclipProject: Codable, Equatable {
             backgroundImageB64: style.backgroundImage?.base64EncodedString(),
             paddingFraction: style.paddingFraction,
             cornerRadiusFraction: style.cornerRadiusFraction,
+            squircleCorners: style.squircleCorners,
             shadowOpacity: style.shadowOpacity,
             shadowRadius: style.shadowRadius,
             backgroundBlur: style.backgroundBlur,
@@ -147,6 +149,7 @@ struct ReclipProject: Codable, Equatable {
         s.backgroundImage = backgroundImageB64.flatMap { Data(base64Encoded: $0) }
         s.paddingFraction = paddingFraction
         s.cornerRadiusFraction = cornerRadiusFraction
+        s.squircleCorners = squircleCorners
         s.shadowOpacity = shadowOpacity
         s.shadowRadius = shadowRadius
         s.backgroundBlur = backgroundBlur

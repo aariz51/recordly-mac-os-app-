@@ -1,6 +1,8 @@
 import XCTest
 import AVFoundation
 import CoreGraphics
+import CoreImage
+import CoreImage.CIFilterBuiltins
 import ImageIO
 import AppKit
 @testable import Reclip
@@ -663,6 +665,42 @@ final class ParityFeatureTests: XCTestCase {
         try project.save(to: url)
         let loaded = try ReclipProject.load(from: url)
         XCTAssertEqual(loaded.style().backgroundImage, png)
+    }
+
+    func testSquircleCornerIsFullerThanCircle() {
+        let extent = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let sq = try! XCTUnwrap(StyledExport.squircleMask(extent: extent, radius: 40))
+        // Circular reference mask of the same radius.
+        let gen = CIFilter.roundedRectangleGenerator()
+        gen.color = .white; gen.extent = extent; gen.radius = 40
+        let circ = gen.outputImage!.cropped(to: extent)
+
+        let ctx = CIContext()
+        func alpha(_ img: CIImage, _ x: Int, _ y: Int) -> Int {
+            var px = [UInt8](repeating: 0, count: 4)
+            ctx.render(img, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: x, y: y, width: 1, height: 1),
+                       format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+            return Int(px[3])
+        }
+        // (8,8) sits inside the squircle bulge but outside the circle of radius 40 at (40,40).
+        XCTAssertGreaterThan(alpha(sq, 8, 8), 200, "squircle corner covers the near-corner pixel")
+        XCTAssertLessThan(alpha(circ, 8, 8), 60, "the circle does not")
+        // Deep interior is opaque for both; far outside is clear for both.
+        XCTAssertGreaterThan(alpha(sq, 50, 50), 200)
+        XCTAssertLessThan(alpha(sq, 1, 1), 60)
+    }
+
+    func testSquircleExportsAndRoundTrips() async throws {
+        let src = tmp("squ-src.mp4"); try await makeVideo(src)
+        var s = StyleOptions(); s.squircleCorners = true; s.cornerRadiusFraction = 0.06
+        let out = tmp("squ.mp4")
+        try await StyledExport.export(source: src, to: out, style: s)
+        try await assertValid(out)
+        let project = ReclipProject.capture(source: src, style: s, zoom: ZoomTimeline(), webcam: WebcamSettings(),
+                                            annotations: [], trimStart: 0, trimEnd: 0, speed: 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("squ.reclip")
+        try project.save(to: url)
+        XCTAssertTrue(try ReclipProject.load(from: url).style().squircleCorners)
     }
 
     func testShadowProfilesDecreasePerLayer() {

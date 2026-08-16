@@ -62,6 +62,7 @@ struct StyleOptions: Equatable {
     }
     var paddingInsets: PaddingInsets? = nil
     var cornerRadiusFraction: Double = 0.03
+    var squircleCorners: Bool = false      // continuous (superellipse) corners instead of circular
     var shadowOpacity: Double = 0.35
     var shadowRadius: Double = 24
     var backgroundBlur: Double = 0         // 0 = off; blurs the source behind as the backdrop
@@ -281,6 +282,7 @@ enum StyledExport {
                                    canvas: canvas,
                                    contentRect: contentRect,
                                    corner: corner,
+                                   squircle: style.squircleCorners,
                                    shadowOpacity: style.shadowOpacity,
                                    shadowRadius: style.shadowRadius,
                                    context: ciContext)
@@ -638,6 +640,7 @@ enum StyledExport {
                                 canvas: CGSize,
                                 contentRect: CGRect,
                                 corner: CGFloat,
+                                squircle: Bool = false,
                                 shadowOpacity: Double,
                                 shadowRadius: Double,
                                 context: CIContext) -> CIImage {
@@ -656,7 +659,7 @@ enum StyledExport {
         let positioned = scaled.transformed(by: CGAffineTransform(translationX: originX, y: originY))
 
         // Rounded-corner mask over the positioned footage.
-        let rounded = roundCorners(positioned, radius: corner)
+        let rounded = roundCorners(positioned, radius: corner, squircle: squircle)
 
         // Layered drop shadow behind the footage card (Recordly stacks three profiles
         // — a wide soft base plus two tighter layers — for a more natural falloff than
@@ -675,19 +678,63 @@ enum StyledExport {
         return rounded.composited(over: result)
     }
 
-    private static func roundCorners(_ image: CIImage, radius: CGFloat) -> CIImage {
+    private static func roundCorners(_ image: CIImage, radius: CGFloat, squircle: Bool = false) -> CIImage {
         let extent = image.extent
-        let mask = CIFilter.roundedRectangleGenerator()
-        mask.color = CIColor.white
-        mask.extent = extent
-        mask.radius = Float(radius)
-        guard let maskImage = mask.outputImage else { return image }
-
+        let maskImage: CIImage
+        if squircle, let m = squircleMask(extent: extent, radius: radius) {
+            maskImage = m
+        } else {
+            let mask = CIFilter.roundedRectangleGenerator()
+            mask.color = CIColor.white
+            mask.extent = extent
+            mask.radius = Float(radius)
+            guard let mm = mask.outputImage else { return image }
+            maskImage = mm
+        }
         let blend = CIFilter.blendWithMask()
         blend.inputImage = image
         blend.backgroundImage = CIImage.empty()
         blend.maskImage = maskImage.cropped(to: extent)
         return blend.outputImage?.cropped(to: extent) ?? image
+    }
+
+    /// A superellipse (squircle) mask — white inside, clear outside — with corners that are
+    /// fuller than a circle (continuous curvature, as Apple/Recordly use for cards).
+    static func squircleMask(extent: CGRect, radius: CGFloat, n: CGFloat = 5) -> CIImage? {
+        let w = Int(extent.width), h = Int(extent.height)
+        guard w > 0, h > 0,
+              let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let r = min(radius, CGFloat(min(w, h)) / 2)
+        ctx.addPath(squirclePath(width: CGFloat(w), height: CGFloat(h), radius: r, n: n))
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fillPath()
+        guard let cg = ctx.makeImage() else { return nil }
+        return CIImage(cgImage: cg).transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+    }
+
+    private static func squirclePath(width W: CGFloat, height H: CGFloat, radius r: CGFloat, n: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        let steps = 14
+        func pt(_ cx: CGFloat, _ cy: CGFloat, _ ang: CGFloat) -> CGPoint {
+            let c = cos(ang), s = sin(ang)
+            return CGPoint(x: cx + r * (c < 0 ? -1 : 1) * pow(abs(c), 2 / n),
+                           y: cy + r * (s < 0 ? -1 : 1) * pow(abs(s), 2 / n))
+        }
+        func corner(_ cx: CGFloat, _ cy: CGFloat, _ a0: CGFloat, _ start: Bool) {
+            for i in 0...steps {
+                let a = a0 + (.pi / 2) * CGFloat(i) / CGFloat(steps)
+                let p = pt(cx, cy, a)
+                if start && i == 0 { path.move(to: p) } else { path.addLine(to: p) }
+            }
+        }
+        corner(W - r, r, -.pi / 2, true)    // bottom-right
+        corner(W - r, H - r, 0, false)      // top-right
+        corner(r, H - r, .pi / 2, false)    // top-left
+        corner(r, r, .pi, false)            // bottom-left
+        path.closeSubpath()
+        return path
     }
 
     /// One shadow layer: relative alpha/blur/offset scaling (Recordly's ShadowLayerProfile).
