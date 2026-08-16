@@ -88,7 +88,7 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 | **React-to-zoom scaling** | ❌ | — |
 | **Independent width + height** | ✅ | WebcamSettings.aspectRatio |
 | **9-cell position + custom X/Y** | ✅ | full 9-cell grid (custom X/Y still open) |
-| **Crop control** | ✅ | `cropZoom` center zoom (1–3x); pan-offset still open |
+| **Crop control** | ✅ | `cropZoom` (1–3x) + `cropOffsetX/Y` pan; tested |
 | **Upload / replace / remove footage** | ❌ | live only |
 | **Time-offset alignment** | ❌ | — |
 
