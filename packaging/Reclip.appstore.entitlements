@@ -14,5 +14,10 @@
     <true/>
     <key>com.apple.security.assets.movies.read-write</key>
     <true/>
+    <!-- App Store identity (normally injected by Xcode; required for manual signing). -->
+    <key>com.apple.application-identifier</key>
+    <string>9Y959T63P7.com.aariz51.reclip</string>
+    <key>com.apple.developer.team-identifier</key>
+    <string>9Y959T63P7</string>
 </dict>
 </plist>

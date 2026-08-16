@@ -6,6 +6,10 @@
     <string>Reclip</string>
     <key>CFBundleDisplayName</key>
     <string>Reclip</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>CFBundleIconName</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.aariz51.reclip</string>
     <key>CFBundleExecutable</key>
