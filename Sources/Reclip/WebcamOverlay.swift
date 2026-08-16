@@ -23,6 +23,8 @@ struct WebcamSettings: Equatable {
     var sizeFraction: Double = 0.22   // width, as a fraction of the canvas short side
     var aspectRatio: Double = 1.0     // height / width (1 = square bubble)
     var cropZoom: Double = 1.0        // 1 = full frame; >1 zooms into the center of the feed
+    var cropOffsetX: Double = 0       // -1…1 pan within the feed (only meaningful when cropZoom>1)
+    var cropOffsetY: Double = 0
     var marginFraction: Double = 0.04 // gap from the frame edge, fraction of short side
     var roundness: Double = 1.0       // 1 = fully round, 0 = square corners
     var mirror: Bool = true           // selfie-style horizontal flip
@@ -93,7 +95,11 @@ enum WebcamOverlay {
         // Optional center zoom into the feed (crop a smaller region, then scale it up to fill).
         let zoom = CGFloat(max(1.0, min(settings.cropZoom, 3.0)))
         let zCropW = cropW / zoom, zCropH = cropH / zoom
-        let crop = CGRect(x: ext.midX - zCropW / 2, y: ext.midY - zCropH / 2, width: zCropW, height: zCropH)
+        // Pan within the available margin (clamped so the crop stays inside the feed).
+        let marginX = (ext.width - zCropW) / 2, marginY = (ext.height - zCropH) / 2
+        let cx = ext.midX + CGFloat(max(-1, min(settings.cropOffsetX, 1))) * marginX
+        let cy = ext.midY + CGFloat(max(-1, min(settings.cropOffsetY, 1))) * marginY
+        let crop = CGRect(x: cx - zCropW / 2, y: cy - zCropH / 2, width: zCropW, height: zCropH)
         var img = cam.cropped(to: crop)
             .transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
         // Selfie-style horizontal mirror.

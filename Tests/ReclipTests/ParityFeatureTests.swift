@@ -364,14 +364,31 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testWebcamPanOffsetExports() async throws {
+        let src = tmp("wcpan-src.mp4"); try await makeVideo(src)
+        let cam = WebcamRecorder.sidecarURL(for: src)
+        try await makeVideo(cam, size: CGSize(width: 400, height: 300))
+        let frames = await WebcamOverlay.load(for: src)
+        XCTAssertFalse(frames.isEmpty)
+        var wc = WebcamSettings(); wc.enabled = true; wc.cropZoom = 2.0
+        wc.cropOffsetX = -0.8; wc.cropOffsetY = 0.6; wc.sizeFraction = 0.25   // pan to a corner
+        let out = tmp("wcpan.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(),
+                                      webcam: frames, webcamSettings: wc)
+        try await assertValid(out)
+    }
+
     func testWebcamCropZoomProjectRoundTrip() throws {
-        var wc = WebcamSettings(); wc.cropZoom = 1.75
+        var wc = WebcamSettings(); wc.cropZoom = 1.75; wc.cropOffsetX = -0.4; wc.cropOffsetY = 0.3
         let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
                                             style: StyleOptions(), zoom: ZoomTimeline(), webcam: wc,
                                             annotations: [], trimStart: 0, trimEnd: 0, speed: 1)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("wcz.reclip")
         try project.save(to: url)
-        XCTAssertEqual(try ReclipProject.load(from: url).webcamSettings().cropZoom, 1.75, accuracy: 1e-9)
+        let w = try ReclipProject.load(from: url).webcamSettings()
+        XCTAssertEqual(w.cropZoom, 1.75, accuracy: 1e-9)
+        XCTAssertEqual(w.cropOffsetX, -0.4, accuracy: 1e-9)
+        XCTAssertEqual(w.cropOffsetY, 0.3, accuracy: 1e-9)
     }
 
     func testDirectionalArrowsExport() async throws {

@@ -75,6 +75,8 @@ struct ReclipProject: Codable, Equatable {
         var roundness: Double; var mirror: Bool; var shadow: Bool
         var aspectRatio: Double = 1.0
         var cropZoom: Double = 1.0
+        var cropOffsetX: Double = 0
+        var cropOffsetY: Double = 0
     }
     struct Cap: Codable, Equatable {
         var text: String; var start: Double; var end: Double
@@ -120,7 +122,8 @@ struct ReclipProject: Codable, Equatable {
             zoomRamp: zoom.ramp,
             webcam: Cam(enabled: webcam.enabled, corner: webcam.corner.rawValue, size: webcam.sizeFraction,
                         margin: webcam.marginFraction, roundness: webcam.roundness, mirror: webcam.mirror,
-                        shadow: webcam.shadow, aspectRatio: webcam.aspectRatio, cropZoom: webcam.cropZoom),
+                        shadow: webcam.shadow, aspectRatio: webcam.aspectRatio, cropZoom: webcam.cropZoom,
+                        cropOffsetX: webcam.cropOffsetX, cropOffsetY: webcam.cropOffsetY),
             captions: annotations.map {
                 Cap(text: $0.text, start: $0.start, end: $0.end, x: $0.position.x, y: $0.position.y,
                     fontFraction: $0.fontFraction, kind: $0.kind.rawValue,
@@ -167,6 +170,8 @@ struct ReclipProject: Codable, Equatable {
         w.sizeFraction = webcam.size
         w.aspectRatio = webcam.aspectRatio
         w.cropZoom = webcam.cropZoom
+        w.cropOffsetX = webcam.cropOffsetX
+        w.cropOffsetY = webcam.cropOffsetY
         w.marginFraction = webcam.margin
         w.roundness = webcam.roundness
         w.mirror = webcam.mirror
