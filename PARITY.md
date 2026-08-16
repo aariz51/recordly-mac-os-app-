@@ -36,7 +36,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Webcam live preview | ❌ | needs capture-session preview layer |
 | **Floating HUD control bar** | ❌ | — |
 | Cursor position telemetry | ✅ | CursorSampler |
-| **Cursor click/interaction capture** | ❌ | position only |
+| **Cursor click/interaction capture** | ✅ | click timestamps captured; expanding ripple rendered (CursorClickEffect timing); pixel-verified |
 | **System cursor asset extraction** | ✅ | `SystemCursor` extracts real NSCursor image; `.system` cursor kind; tested |
 | Cursor show/hide | ✅ | showCursor (batch 1) |
 | **Crash recovery / validation / pruning** | ✅ | `RecordingValidator` validate + prune (empty/unreadable/orphaned sidecars); tested |
