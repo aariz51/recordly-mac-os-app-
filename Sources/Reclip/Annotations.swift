@@ -28,6 +28,7 @@ struct Annotation: Identifiable, Equatable {
     var showBackground: Bool = true                      // the rounded pill behind the text
     var bgColorRGBA: [Double] = [0, 0, 0, 0.55]          // pill colour
     var arrowAngle: Double = 0                           // degrees, 0 = pointing right (for .arrow)
+    var fadeDuration: Double = 0                          // seconds to fade in/out (0 = hard cut)
 }
 
 /// An annotation with any pre-rendered image (text/image kinds); region kinds render live.
@@ -103,20 +104,38 @@ enum Annotations {
         }
     }
 
+    /// Opacity envelope for fade in/out: ramps 0→1 over `fade` seconds after `start` and
+    /// 1→0 over `fade` seconds before `end` (1 throughout when `fade` is 0).
+    static func fadeFactor(time t: Double, start: Double, end: Double, fade f: Double) -> Double {
+        guard f > 0.001 else { return 1 }
+        let fadeIn = min(1, max(0, (t - start) / f))
+        let fadeOut = min(1, max(0, (end - t) / f))
+        return min(fadeIn, fadeOut)
+    }
+
+    private static func faded(_ img: CIImage, _ factor: Double) -> CIImage {
+        guard factor < 0.999 else { return img }
+        let cm = CIFilter.colorMatrix()
+        cm.inputImage = img
+        cm.aVector = CIVector(x: 0, y: 0, z: 0, w: CGFloat(max(0, factor)))
+        return cm.outputImage ?? img
+    }
+
     static func composite(base: CIImage, canvas: CGSize,
                           rendered: [RenderedAnnotation], time: Double) -> CIImage {
         var result = base
         for r in rendered where time >= r.annotation.start && time <= r.annotation.end {
             let a = r.annotation
+            let fade = fadeFactor(time: time, start: a.start, end: a.end, fade: a.fadeDuration)
             switch a.kind {
             case .text:
                 guard let image = r.image else { continue }
                 let px = a.position.x * canvas.width - r.pixelSize.width / 2
                 let py = (1 - a.position.y) * canvas.height - r.pixelSize.height / 2
-                result = image.transformed(by: CGAffineTransform(translationX: px, y: py)).composited(over: result)
+                result = faded(image, fade).transformed(by: CGAffineTransform(translationX: px, y: py)).composited(over: result)
             case .image:
                 guard let image = r.image else { continue }
-                result = placeInRegion(image, annotation: a, canvas: canvas).composited(over: result)
+                result = faded(placeInRegion(image, annotation: a, canvas: canvas), fade).composited(over: result)
             case .box:
                 let rect = regionRect(a, canvas: canvas)
                 let c = a.colorRGBA

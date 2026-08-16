@@ -150,6 +150,19 @@ final class TimeMapTests: XCTestCase {
     }
 }
 
+final class AnnotationFadeTests: XCTestCase {
+    func testFadeEnvelope() {
+        // start=1, end=5, fade=1s
+        XCTAssertEqual(Annotations.fadeFactor(time: 1.0, start: 1, end: 5, fade: 1), 0, accuracy: 1e-9)  // at start
+        XCTAssertEqual(Annotations.fadeFactor(time: 1.5, start: 1, end: 5, fade: 1), 0.5, accuracy: 1e-9) // mid fade-in
+        XCTAssertEqual(Annotations.fadeFactor(time: 3.0, start: 1, end: 5, fade: 1), 1, accuracy: 1e-9)  // fully in
+        XCTAssertEqual(Annotations.fadeFactor(time: 4.5, start: 1, end: 5, fade: 1), 0.5, accuracy: 1e-9) // mid fade-out
+        XCTAssertEqual(Annotations.fadeFactor(time: 5.0, start: 1, end: 5, fade: 1), 0, accuracy: 1e-9)  // at end
+        // fade=0 → always fully opaque
+        XCTAssertEqual(Annotations.fadeFactor(time: 3, start: 1, end: 5, fade: 0), 1, accuracy: 1e-9)
+    }
+}
+
 final class SpeedMapTests: XCTestCase {
     func testPiecewiseMappingAndDuration() {
         // 10s source, [0,4] played at 2×, rest 1×.

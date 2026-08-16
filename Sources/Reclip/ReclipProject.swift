@@ -99,6 +99,7 @@ struct ReclipProject: Codable, Equatable {
         var showBg: Bool = true
         var bgColor: [Double] = [0, 0, 0, 0.55]
         var arrowAngle: Double = 0
+        var fadeDuration: Double = 0
     }
 
     // MARK: Capture / restore
@@ -142,7 +143,7 @@ struct ReclipProject: Codable, Equatable {
                     rw: $0.regionSize.width, rh: $0.regionSize.height, blurRadius: $0.blurRadius,
                     color: $0.colorRGBA, imageB64: $0.imageData?.base64EncodedString(),
                     bold: $0.bold, textColor: $0.textColorRGBA, showBg: $0.showBackground, bgColor: $0.bgColorRGBA,
-                    arrowAngle: $0.arrowAngle)
+                    arrowAngle: $0.arrowAngle, fadeDuration: $0.fadeDuration)
             },
             cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size,
                               spotlight: cursorStyle.spotlight, spotlightRadius: cursorStyle.spotlightRadius, spotlightDim: cursorStyle.spotlightDim),
@@ -210,6 +211,7 @@ struct ReclipProject: Codable, Equatable {
             a.showBackground = c.showBg
             a.bgColorRGBA = c.bgColor
             a.arrowAngle = c.arrowAngle
+            a.fadeDuration = c.fadeDuration
             return a
         }
     }
