@@ -825,6 +825,13 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertGreaterThan(ExportBitrate.mp4(width: 3840, height: 2160, quality: .source),
                              ExportBitrate.mp4(width: 3840, height: 2160, quality: .high))
         XCTAssertEqual(ExportBitrate.mp4(width: 3840, height: 2160, quality: .source), 80_000_000)
+        // Encoding mode scales the bitrate (Recordly's 0.1/0.75/1.0 multipliers).
+        let q = ExportBitrate.mp4(width: 1920, height: 1080, quality: .high, encoding: .quality)
+        let b = ExportBitrate.mp4(width: 1920, height: 1080, quality: .high, encoding: .balanced)
+        let f = ExportBitrate.mp4(width: 1920, height: 1080, quality: .high, encoding: .fast)
+        XCTAssertEqual(Double(b), Double(q) * 0.75, accuracy: 1)
+        XCTAssertLessThan(f, b)
+        XCTAssertGreaterThanOrEqual(f, ExportBitrate.minimum)   // floor still applies
     }
 
     /// The re-encode path must actually change the output frame-rate — this is the gap

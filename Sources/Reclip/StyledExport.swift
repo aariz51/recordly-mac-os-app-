@@ -119,6 +119,15 @@ enum MP4FrameRate: Int, CaseIterable, Identifiable {
     var label: String { "\(rawValue) fps" }
 }
 
+/// Encoding effort → bitrate multiplier (Recordly's getEncodingModeBitrateMultiplier).
+enum EncodingMode: String, CaseIterable, Identifiable {
+    case fast, balanced, quality
+    var id: String { rawValue }
+    var multiplier: Double {
+        switch self { case .fast: return 0.1; case .balanced: return 0.75; case .quality: return 1.0 }
+    }
+}
+
 /// Resolution-aware target bitrate, mirroring Recordly's `exportBitrate` tiers.
 enum ExportBitrate {
     static let minimum = 2_000_000                      // Recordly MIN_MP4_BITRATE
@@ -135,11 +144,14 @@ enum ExportBitrate {
         if px > 1920 * 1080 { return 50_000_000 }
         return 30_000_000
     }
-    static func mp4(width: Int, height: Int, quality: ExportQuality) -> Int {
-        if quality == .source { return source(width: width, height: height) }
-        let mult: Double
-        switch quality { case .source, .high: mult = 1.0; case .medium: mult = 0.6; case .low: mult = 0.3 }
-        return max(minimum, Int(Double(base(width: width, height: height)) * mult))
+    static func mp4(width: Int, height: Int, quality: ExportQuality,
+                    encoding: EncodingMode = .quality) -> Int {
+        let raw: Int = quality == .source ? source(width: width, height: height) : {
+            let mult: Double
+            switch quality { case .source, .high: mult = 1.0; case .medium: mult = 0.6; case .low: mult = 0.3 }
+            return Int(Double(base(width: width, height: height)) * mult)
+        }()
+        return max(minimum, Int(Double(raw) * encoding.multiplier))
     }
 }
 
@@ -509,6 +521,7 @@ enum StyledExport {
                                 annotations: [Annotation] = [],
                                 speed: Double = 1.0,
                                 quality: ExportQuality = .high,
+                                encoding: EncodingMode = .quality,
                                 frameRate: MP4FrameRate = .fps30,
                                 motionBlur: Double = 0,
                                 cursor: CursorTrack? = nil,
@@ -551,7 +564,7 @@ enum StyledExport {
         // Writer: H.264 with an explicit average-bitrate + source-frame-rate hint.
         try? FileManager.default.removeItem(at: output)
         let writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
-        let bitrate = ExportBitrate.mp4(width: Int(canvas.width), height: Int(canvas.height), quality: quality)
+        let bitrate = ExportBitrate.mp4(width: Int(canvas.width), height: Int(canvas.height), quality: quality, encoding: encoding)
         let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Int(canvas.width), AVVideoHeightKey: Int(canvas.height),
