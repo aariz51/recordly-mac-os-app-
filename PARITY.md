@@ -29,7 +29,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Microphone capture | ✅ | captureMicrophone |
 | **Mic device selection** | ✅ | `DeviceEnumerator.microphones()` + `microphoneDeviceID`; manually verified finding real devices on-device |
 | **Mic level meter** | 🟡 | RMS/peak math ported + tested (`AudioLevelMeter`); live tap needs mic permission |
-| **Mic processing profiles** | ❌ | raw only |
+| **Mic processing profiles** | ✅ | `MicProcessor` high-pass + noise gate + raw/voice/music (signal-verified DSP); export-mux wiring is follow-up |
 | System audio | ✅ | captureSystemAudio |
 | Webcam capture | ✅ | sidecar |
 | **Webcam device selection** | ✅ | `DeviceEnumerator.cameras()` + `webcamDeviceID`; manually verified (built-in + Continuity cameras found) |
