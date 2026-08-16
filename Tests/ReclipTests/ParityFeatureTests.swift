@@ -414,6 +414,85 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertLessThan(quietRMS, loudRMS * 0.6, "0.25 gain should be clearly quieter than 1.0")
     }
 
+    /// Writes a clip with a video track plus TWO audio tracks, both a 440Hz tone.
+    private func makeVideoWith2AudioTracks(_ url: URL, seconds: Double = 1.0) async throws {
+        try? FileManager.default.removeItem(at: url)
+        let w = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        let vIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
+            AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 240])
+        let ad = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: vIn,
+            sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
+        func makeAudioInput() -> AVAssetWriterInput {
+            let i = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 64000])
+            i.expectsMediaDataInRealTime = false; return i
+        }
+        let a0 = makeAudioInput(), a1 = makeAudioInput()
+        w.add(vIn); w.add(a0); w.add(a1); w.startWriting(); w.startSession(atSourceTime: .zero)
+        let fps: Int32 = 30, total = Int(Double(fps) * seconds)
+        for i in 0..<total {
+            while !vIn.isReadyForMoreMediaData { usleep(400) }
+            var pb: CVPixelBuffer!
+            CVPixelBufferCreate(nil, 320, 240, kCVPixelFormatType_32BGRA, nil, &pb)
+            ad.append(pb, withPresentationTime: CMTime(value: CMTimeValue(i), timescale: fps))
+        }
+        vIn.markAsFinished()
+        let sr = 44100.0, chunk = 4410
+        var asbd = AudioStreamBasicDescription(mSampleRate: sr, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+            mBitsPerChannel: 16, mReserved: 0)
+        var fmt: CMFormatDescription?
+        CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil,
+            magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &fmt)
+        for input in [a0, a1] {
+            var t = 0
+            while Double(t) / sr < seconds {
+                while !input.isReadyForMoreMediaData { usleep(400) }
+                var samples = [Int16](repeating: 0, count: chunk)
+                for i in 0..<chunk { samples[i] = Int16(sin(2 * .pi * 440 * Double(t + i) / sr) * 12000) }
+                let bytes = chunk * 2
+                var block: CMBlockBuffer?
+                CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes,
+                    blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: bytes,
+                    flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
+                samples.withUnsafeBytes { raw in
+                    _ = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!, blockBuffer: block!,
+                                                      offsetIntoDestination: 0, dataLength: bytes)
+                }
+                var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: CMTimeScale(sr)),
+                    presentationTimeStamp: CMTime(value: CMTimeValue(t), timescale: CMTimeScale(sr)),
+                    decodeTimeStamp: .invalid)
+                var sb: CMSampleBuffer?
+                CMSampleBufferCreate(allocator: nil, dataBuffer: block, dataReady: true,
+                    makeDataReadyCallback: nil, refcon: nil, formatDescription: fmt,
+                    sampleCount: chunk, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+                    sampleSizeEntryCount: 1, sampleSizeArray: [2], sampleBufferOut: &sb)
+                if let sb { input.append(sb) }
+                t += chunk
+            }
+            input.markAsFinished()
+        }
+        await w.finishWriting()
+    }
+
+    func testAudioRoutingMutesMicTrackInExport() async throws {
+        let src = tmp("route-src.mp4"); try await makeVideoWith2AudioTracks(src, seconds: 1.0)
+        let bothAudio = try await AVURLAsset(url: src).loadTracks(withMediaType: .audio).count
+        XCTAssertEqual(bothAudio, 2, "source must have two audio tracks (system + mic)")
+        // Both tracks on.
+        var both = StyleOptions(); both.audioRouting = AudioRouting()
+        let bothURL = tmp("route-both.mp4"); try await StyledExport.export(source: src, to: bothURL, style: both)
+        // Mute the mic track (index 1).
+        var muted = StyleOptions(); var r = AudioRouting(); r.micEnabled = false; muted.audioRouting = r
+        let mutedURL = tmp("route-muted.mp4"); try await StyledExport.export(source: src, to: mutedURL, style: muted)
+        let bothRMS = try await audioRMS(bothURL)
+        let mutedRMS = try await audioRMS(mutedURL)
+        XCTAssertGreaterThan(bothRMS, 50)
+        XCTAssertLessThan(mutedRMS, bothRMS * 0.85, "muting one of two tone tracks reduces the mixed output")
+    }
+
     func testMicVoiceProfileRemovesLowFreqInExport() async throws {
         // 40Hz rumble source; the voice profile (90Hz high-pass) should gut it in the export.
         let src = tmp("mic-src.mp4"); try await makeVideoWithAudio(src, seconds: 1.0, tone: true, toneHz: 40)

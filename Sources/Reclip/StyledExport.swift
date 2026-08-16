@@ -73,6 +73,7 @@ struct StyleOptions: Equatable {
     var normalizeAudio: Bool = false       // auto-boost quiet audio toward full scale
     var audioVolumeRegions: [AudioVolumeRegion] = []   // per-region volume overrides (composition time)
     var micProfile: MicProfile = .raw                  // mic DSP profile (raw/voice/music)
+    var audioRouting: AudioRouting? = nil              // per-track mic/system gain (needs separate tracks)
     var maxOutputHeight: Int? = nil        // cap output height (e.g. 1080/720); width scales with it
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
@@ -369,7 +370,7 @@ enum StyledExport {
                 gain *= await Self.normalizationGain(for: srcAsset, range: srcRange)
             }
             let baseGain = Float(max(0, min(gain, 4.0)))
-            if abs(gain - 1.0) > 0.001 || !style.audioVolumeRegions.isEmpty {
+            if abs(gain - 1.0) > 0.001 || !style.audioVolumeRegions.isEmpty || style.audioRouting != nil {
                 let audioTracks = comp.tracks(withMediaType: .audio)
                 if !audioTracks.isEmpty {
                     let regions = style.audioVolumeRegions.sorted { $0.start < $1.start }
@@ -387,12 +388,21 @@ enum StyledExport {
                     }
                     if cursor < total { segs.append((cursor, total, baseGain)) }
 
+                    // Per-track routing gain: with ≥2 tracks, index 0 = system, 1 = mic
+                    // (ScreenRecorder's add order); a single track is treated as mixed.
+                    func routeGain(_ idx: Int) -> Float {
+                        guard let r = style.audioRouting else { return 1 }
+                        let tid: SourceTrackId = audioTracks.count > 1 ? (idx == 0 ? .system : .mic) : .mixed
+                        return Float(r.effectiveGain(for: tid))
+                    }
+
                     let mix = AVMutableAudioMix()
-                    mix.inputParameters = audioTracks.map { track in
+                    mix.inputParameters = audioTracks.enumerated().map { (idx, track) in
+                        let rg = routeGain(idx)
                         let p = AVMutableAudioMixInputParameters(track: track)
-                        p.setVolume(baseGain, at: .zero)
+                        p.setVolume(baseGain * rg, at: .zero)
                         for (s, e, v) in segs {
-                            p.setVolumeRamp(fromStartVolume: v, toEndVolume: v,
+                            p.setVolumeRamp(fromStartVolume: v * rg, toEndVolume: v * rg,
                                             timeRange: CMTimeRange(
                                                 start: CMTime(seconds: s, preferredTimescale: 600),
                                                 duration: CMTime(seconds: e - s, preferredTimescale: 600)))
