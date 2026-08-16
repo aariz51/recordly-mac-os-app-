@@ -23,7 +23,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Native backend (mac SCK) | ✅ | ScreenCaptureKit |
 | Target 60fps / retina | ✅ | config |
 | **Pause / Resume recording** | ✅ | `RecordingClock` + frame-drop pause, wired into ScreenRecorder; **verified in a real recording** (integration test drives start→pause→resume→stop → valid video) |
-| **Cancel (discard) recording** | 🟡 | clock.reset landed; UI discard action pending |
+| **Cancel (discard) recording** | ✅ | `ScreenRecorder.discard()` stops + deletes take & sidecars; tested |
 | Live REC timer | ✅ | elapsed, now backed by RecordingClock |
 | **Countdown timer (3/5/10s)** | ✅ | `Countdown` model (remaining/finished) unit-tested; UI hookup pending |
 | Microphone capture | ✅ | captureMicrophone |
