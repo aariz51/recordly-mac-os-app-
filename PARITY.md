@@ -31,7 +31,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | **Mic level meter** | 🟡 | RMS/peak math ported + tested (`AudioLevelMeter`); live tap needs mic permission |
 | **Mic processing profiles** | ✅ | `MicProcessor` high-pass + noise gate + raw/voice/music, wired into export via passthrough post-mux; end-to-end verified (rumble removed in exported file) |
 | System audio | ✅ | captureSystemAudio |
-| **Separate mic/system routing (per-track + master gain)** | 🟡 | `AudioRouting` gain model ported + tested; separate-sidecar capture + export wiring is follow-up |
+| **Separate mic/system routing (per-track + master gain)** | ✅ | `AudioRouting` model + export wiring (per-track gain via AVAudioMix); verified muting mic track on a 2-track source |
 | Webcam capture | ✅ | sidecar |
 | **Webcam device selection** | ✅ | `DeviceEnumerator.cameras()` + `webcamDeviceID`; manually verified (built-in + Continuity cameras found) |
 | Webcam live preview | ❌ | needs capture-session preview layer |
