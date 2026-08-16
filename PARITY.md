@@ -125,7 +125,7 @@ library instead of a subprocess.
 | **MP4 frame rate (24/30/60)** | ✅ | `exportReencoded` — AVAssetReader→AVAssetWriter with slot-based resampling (drops/dups frames); verified by counting real output frames |
 | **Resolution-aware bitrate tiers** | ✅ | `ExportBitrate` mirrors Recordly's 10/20/30M tiers + quality multiplier + 2M floor; applied via AVVideoAverageBitRateKey in the re-encode path |
 | **Temporal motion blur** | ✅ | `MotionBlur` — exact port of Recordly's config/sample-plan (odd sample count, shutter fraction, cosine-tapered weights summing to 1) + weighted frame blend wired into the re-encode path |
-| **MP4 encoding mode / HW accel** | ❌ | fixed |
+| **MP4 encoding mode / HW accel** | ✅ | `EncodingMode` fast/balanced/quality bitrate multiplier; HW accel automatic via VideoToolbox |
 | GIF loop toggle | ✅ | batch 1 |
 | GIF frame-rate (4) + size presets (3) | ✅ | GifSize presets + fps param |
 | Output dimension control | ✅ | aspect presets + `maxOutputHeight` resolution cap (1080/720/…); tested |
