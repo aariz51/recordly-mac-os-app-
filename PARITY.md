@@ -128,7 +128,7 @@ library instead of a subprocess.
 | **MP4 encoding mode / HW accel** | ❌ | fixed |
 | GIF loop toggle | ✅ | batch 1 |
 | GIF frame-rate (4) + size presets (3) | ✅ | GifSize presets + fps param |
-| Output dimension control | 🟡 | via aspect (batch 2) |
+| Output dimension control | ✅ | aspect presets + `maxOutputHeight` resolution cap (1080/720/…); tested |
 | Reveal in Finder | ✅ | — |
 | Save dialog / Save-again / discard | 🟡 | fixed output path |
 | Export progress phases | ✅ | `ExportProgress` phase model (preparing/extracting/rendering/finalizing/saving) + `saving(previous:)`; unit-tested |
