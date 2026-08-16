@@ -21,6 +21,7 @@ struct ReclipProject: Codable, Equatable {
     var audioVolume: Double = 1.0
     var normalizeAudio: Bool = false
     var audioVolumeRegions: [AudioVolumeRegion] = []
+    var micProfile: String = MicProfile.raw.rawValue
     var maxOutputHeight: Int? = nil
     var crop: Crop
     var padInsets: Pad? = nil
@@ -131,6 +132,7 @@ struct ReclipProject: Codable, Equatable {
             audioVolume: style.audioVolume,
             normalizeAudio: style.normalizeAudio,
             audioVolumeRegions: style.audioVolumeRegions,
+            micProfile: style.micProfile.rawValue,
             maxOutputHeight: style.maxOutputHeight,
             crop: Crop(top: style.crop.top, bottom: style.crop.bottom, left: style.crop.left, right: style.crop.right),
             padInsets: style.paddingInsets.map { Pad(top: $0.top, bottom: $0.bottom, left: $0.left, right: $0.right) },
@@ -178,6 +180,7 @@ struct ReclipProject: Codable, Equatable {
         s.audioVolume = audioVolume
         s.normalizeAudio = normalizeAudio
         s.audioVolumeRegions = audioVolumeRegions
+        s.micProfile = MicProfile(rawValue: micProfile) ?? .raw
         s.maxOutputHeight = maxOutputHeight
         s.crop = StyleOptions.CropInsets(top: crop.top, bottom: crop.bottom, left: crop.left, right: crop.right)
         s.paddingInsets = padInsets.map { StyleOptions.PaddingInsets(top: $0.top, bottom: $0.bottom, left: $0.left, right: $0.right) }

@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 /// Microphone processing profiles (Recordly offers raw/voice/music-style processing).
 enum MicProfile: String, CaseIterable, Identifiable, Codable {
@@ -63,5 +64,82 @@ enum MicProcessor {
             }
         }
         return result
+    }
+
+    /// Extracts an asset's audio (mono 44.1kHz PCM) over `range`, runs the profile, and
+    /// writes a processed WAV; returns its URL (nil for `raw`, no audio, or on failure).
+    static func processedAudioFile(from asset: AVAsset, range: CMTimeRange, profile: MicProfile) async -> URL? {
+        guard profile != .raw,
+              let track = try? await asset.loadTracks(withMediaType: .audio).first,
+              let reader = try? AVAssetReader(asset: asset) else { return nil }
+        reader.timeRange = range
+        let out = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1])
+        guard reader.canAdd(out) else { return nil }
+        reader.add(out)
+        guard reader.startReading() else { return nil }
+        var pcm = Data()
+        while reader.status == .reading, let sb = out.copyNextSampleBuffer() {
+            guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
+            var len = 0; var ptr: UnsafeMutablePointer<Int8>?
+            CMBlockBufferGetDataPointer(bb, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &len, dataPointerOut: &ptr)
+            if let ptr, len > 0 { pcm.append(Data(bytes: ptr, count: len)) }
+        }
+        guard !pcm.isEmpty else { return nil }
+        let processed = processPCM16(pcm, profile: profile, sampleRate: 44100)
+        return await writeM4A(processed, sampleRate: 44100)
+    }
+
+    /// Encodes 16-bit mono PCM to an AAC .m4a file (mp4-muxable, unlike raw LPCM WAV).
+    private static func writeM4A(_ pcm: Data, sampleRate: Double) async -> URL? {
+        let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("reclip-mic-\(UUID().uuidString).m4a")
+        try? FileManager.default.removeItem(at: url)
+        guard let writer = try? AVAssetWriter(outputURL: url, fileType: .m4a) else { return nil }
+        let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+            AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1, AVEncoderBitRateKey: 128_000])
+        input.expectsMediaDataInRealTime = false
+        guard writer.canAdd(input) else { return nil }
+        writer.add(input)
+        guard writer.startWriting() else { return nil }
+        writer.startSession(atSourceTime: .zero)
+
+        var asbd = AudioStreamBasicDescription(mSampleRate: sampleRate, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+            mBitsPerChannel: 16, mReserved: 0)
+        var fmt: CMFormatDescription?
+        CMAudioFormatDescriptionCreate(allocator: nil, asbd: &asbd, layoutSize: 0, layout: nil,
+            magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &fmt)
+        let chunk = 4096, totalFrames = pcm.count / 2
+        var frame = 0
+        while frame < totalFrames {
+            let n = min(chunk, totalFrames - frame)
+            let bytes = n * 2
+            var block: CMBlockBuffer?
+            CMBlockBufferCreateWithMemoryBlock(allocator: nil, memoryBlock: nil, blockLength: bytes,
+                blockAllocator: nil, customBlockSource: nil, offsetToData: 0, dataLength: bytes,
+                flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block)
+            pcm.withUnsafeBytes { raw in
+                _ = CMBlockBufferReplaceDataBytes(with: raw.baseAddress!.advanced(by: frame * 2),
+                                                  blockBuffer: block!, offsetIntoDestination: 0, dataLength: bytes)
+            }
+            var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: CMTimeScale(sampleRate)),
+                presentationTimeStamp: CMTime(value: CMTimeValue(frame), timescale: CMTimeScale(sampleRate)),
+                decodeTimeStamp: .invalid)
+            var sb: CMSampleBuffer?
+            CMSampleBufferCreate(allocator: nil, dataBuffer: block, dataReady: true,
+                makeDataReadyCallback: nil, refcon: nil, formatDescription: fmt,
+                sampleCount: n, sampleTimingEntryCount: 1, sampleTimingArray: &timing,
+                sampleSizeEntryCount: 1, sampleSizeArray: [2], sampleBufferOut: &sb)
+            while !input.isReadyForMoreMediaData { usleep(400) }
+            if let sb { input.append(sb) }
+            frame += n
+        }
+        input.markAsFinished()
+        await writer.finishWriting()
+        return writer.status == .completed ? url : nil
     }
 }

@@ -72,6 +72,7 @@ struct StyleOptions: Equatable {
     var audioVolume: Double = 1.0          // 0…2 gain applied to the source audio
     var normalizeAudio: Bool = false       // auto-boost quiet audio toward full scale
     var audioVolumeRegions: [AudioVolumeRegion] = []   // per-region volume overrides (composition time)
+    var micProfile: MicProfile = .raw                  // mic DSP profile (raw/voice/music)
     var maxOutputHeight: Int? = nil        // cap output height (e.g. 1080/720); width scales with it
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
@@ -518,18 +519,51 @@ enum StyledExport {
         export.outputFileType = .mp4
         try? FileManager.default.removeItem(at: output)
 
-        guard let progress else {
+        if let progress {
+            // Report a real fraction while the render runs.
+            async let running: Void = export.export(to: output, as: .mp4)
+            for await state in export.states(updateInterval: 0.25) {
+                if case .exporting(let p) = state { progress(p.fractionCompleted) }
+            }
+            try await running
+        } else {
             try await export.export(to: output, as: .mp4)
-            return
         }
 
-        // Report a real fraction while the render runs, so the UI can say how
-        // much is left rather than only that something is happening.
-        async let running: Void = export.export(to: output, as: .mp4)
-        for await state in export.states(updateInterval: 0.25) {
-            if case .exporting(let p) = state { progress(p.fractionCompleted) }
+        // Mic DSP: swap in the processed audio in a fast passthrough pass (a separate mux
+        // avoids AVFoundation's "videoComposition + external audio" export limitation).
+        if style.micProfile != .raw, keepRanges.isEmpty {
+            try? await applyMicProcessing(to: output, source: AVURLAsset(url: source),
+                                          trim: trim, profile: style.micProfile)
         }
-        try await running
+    }
+
+    private static func applyMicProcessing(to output: URL, source: AVURLAsset,
+                                           trim: CMTimeRange?, profile: MicProfile) async throws {
+        let fullDur = (try? await source.load(.duration)) ?? .zero
+        let range = trim ?? CMTimeRange(start: .zero, duration: fullDur)
+        guard let procURL = await MicProcessor.processedAudioFile(from: source, range: range, profile: profile) else { return }
+        let outAsset = AVURLAsset(url: output)
+        guard let vTrack = try? await outAsset.loadTracks(withMediaType: .video).first else { return }
+        let vDur = (try? await outAsset.load(.duration)) ?? .zero
+        let comp = AVMutableComposition()
+        if let cv = comp.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            try? cv.insertTimeRange(CMTimeRange(start: .zero, duration: vDur), of: vTrack, at: .zero)
+            cv.preferredTransform = (try? await vTrack.load(.preferredTransform)) ?? .identity
+        }
+        let procAsset = AVURLAsset(url: procURL)
+        if let aTrack = try? await procAsset.loadTracks(withMediaType: .audio).first,
+           let ca = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
+            let aDur = (try? await procAsset.load(.duration)) ?? vDur
+            try? ca.insertTimeRange(CMTimeRange(start: .zero, duration: min(aDur, vDur)), of: aTrack, at: .zero)
+        }
+        let tmp = output.deletingPathExtension().appendingPathExtension("mic.mp4")
+        try? FileManager.default.removeItem(at: tmp)
+        guard let ex = AVAssetExportSession(asset: comp, presetName: AVAssetExportPresetPassthrough) else { return }
+        ex.outputURL = tmp; ex.outputFileType = .mp4
+        try await ex.export(to: tmp, as: .mp4)
+        try? FileManager.default.removeItem(at: output)
+        try FileManager.default.moveItem(at: tmp, to: output)
     }
 
     /// Re-encodes through AVAssetReader → AVAssetWriter so the output frame-rate and

@@ -308,7 +308,7 @@ final class ParityFeatureTests: XCTestCase {
     }
 
     /// Writes a short clip that has BOTH a video and an audio track (silent, or a 440Hz tone).
-    private func makeVideoWithAudio(_ url: URL, seconds: Double = 1.0, tone: Bool = false) async throws {
+    private func makeVideoWithAudio(_ url: URL, seconds: Double = 1.0, tone: Bool = false, toneHz: Double = 440) async throws {
         try? FileManager.default.removeItem(at: url)
         let w = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let size = CGSize(width: 320, height: 240)
@@ -349,7 +349,7 @@ final class ParityFeatureTests: XCTestCase {
             if tone {
                 var samples = [Int16](repeating: 0, count: chunk)
                 for i in 0..<chunk {
-                    let phase = 2.0 * Double.pi * 440.0 * Double(t + i) / sr
+                    let phase = 2.0 * Double.pi * toneHz * Double(t + i) / sr
                     samples[i] = Int16(sin(phase) * 16000)
                 }
                 samples.withUnsafeBytes { raw in
@@ -412,6 +412,20 @@ final class ParityFeatureTests: XCTestCase {
         let quietRMS = try await audioRMS(quietURL)
         XCTAssertGreaterThan(loudRMS, 100, "full-volume export should carry an audible tone")
         XCTAssertLessThan(quietRMS, loudRMS * 0.6, "0.25 gain should be clearly quieter than 1.0")
+    }
+
+    func testMicVoiceProfileRemovesLowFreqInExport() async throws {
+        // 40Hz rumble source; the voice profile (90Hz high-pass) should gut it in the export.
+        let src = tmp("mic-src.mp4"); try await makeVideoWithAudio(src, seconds: 1.0, tone: true, toneHz: 40)
+        let plain = tmp("mic-plain.mp4")
+        try await StyledExport.export(source: src, to: plain, style: StyleOptions())
+        var s = StyleOptions(); s.micProfile = .voice
+        let voiced = tmp("mic-voice.mp4")
+        try await StyledExport.export(source: src, to: voiced, style: s)
+        let plainRMS = try await audioRMS(plain)
+        let voiceRMS = try await audioRMS(voiced)
+        XCTAssertGreaterThan(plainRMS, 100, "raw export keeps the rumble")
+        XCTAssertLessThan(voiceRMS, plainRMS * 0.4, "voice profile removes the 40Hz rumble")
     }
 
     func testAudioVolumeRegionsDuckFirstHalf() async throws {
