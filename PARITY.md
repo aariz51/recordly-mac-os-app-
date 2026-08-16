@@ -75,7 +75,7 @@ ported and unit-tested**: `MotionSmoothing` (analytical damped-spring cursor+zoo
 smoothing, exact Recordly tuning), `CursorSway` (speed-scaled rotation), and
 `CursorClickEffect` (click-bounce sine dip + delayed ripple timing). Still needs **your
 eyes to tune the look** (spring feel, sway amount, ripple color/opacity) and wiring into
-the render/capture path; more cursor styles, loop mode, and motion presets remain.
+the render/capture path; **cursor spotlight** (dim-around-pointer) now landed + pixel-verified; more cursor styles, loop mode, and motion presets remain.
 
 ## 5. Webcam overlay
 | Feature | Reclip | Note |
