@@ -53,7 +53,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Auto zoom (cursor) | ✅ | ZoomTimeline.autoZoom |
 | **Manual zoom regions (add/edit)** | ✅ | ZoomTimeline.addRegion + depth presets |
 | Zoom depth presets (6) + manual focus + easing (4 curves) | ✅ | ZoomDepth + ZoomEasing |
-| **Zoom connect-neighbors / motion-blur tuning** | ❌ | not implemented |
+| Zoom connect-neighbors ✅ / motion-blur tuning | 🟡 | `connectNeighbors(maxGap:)` merges regions (tested); temporal motion-blur still open |
 | **Speed regions (per-segment)** | 🟡 | global speed only |
 | **Playback controls (play/pause/skip/volume)** | 🟡 | preview loops; no scrub UI |
 
