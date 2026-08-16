@@ -99,6 +99,7 @@ struct ReclipProject: Codable, Equatable {
         var color: [Double] = [0, 0, 0, 0.85]
         var imageB64: String? = nil
         var bold: Bool = true
+        var fontName: String = ""
         var textColor: [Double] = [1, 1, 1, 1]
         var showBg: Bool = true
         var bgColor: [Double] = [0, 0, 0, 0.55]
@@ -149,7 +150,7 @@ struct ReclipProject: Codable, Equatable {
                     fontFraction: $0.fontFraction, kind: $0.kind.rawValue,
                     rw: $0.regionSize.width, rh: $0.regionSize.height, blurRadius: $0.blurRadius,
                     color: $0.colorRGBA, imageB64: $0.imageData?.base64EncodedString(),
-                    bold: $0.bold, textColor: $0.textColorRGBA, showBg: $0.showBackground, bgColor: $0.bgColorRGBA,
+                    bold: $0.bold, fontName: $0.fontName, textColor: $0.textColorRGBA, showBg: $0.showBackground, bgColor: $0.bgColorRGBA,
                     arrowAngle: $0.arrowAngle, fadeDuration: $0.fadeDuration)
             },
             cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size,
@@ -221,6 +222,7 @@ struct ReclipProject: Codable, Equatable {
             a.colorRGBA = c.color
             a.imageData = c.imageB64.flatMap { Data(base64Encoded: $0) }
             a.bold = c.bold
+            a.fontName = c.fontName
             a.textColorRGBA = c.textColor
             a.showBackground = c.showBg
             a.bgColorRGBA = c.bgColor

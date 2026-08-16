@@ -24,6 +24,7 @@ struct Annotation: Identifiable, Equatable {
     var imageData: Data? = nil                           // for .image
     // Text typography (defaulted to the previous fixed style for compatibility):
     var bold: Bool = true
+    var fontName: String = ""                            // custom font family ("" = default Helvetica Neue)
     var textColorRGBA: [Double] = [1, 1, 1, 1]           // text fill (default white)
     var showBackground: Bool = true                      // the rounded pill behind the text
     var bgColorRGBA: [Double] = [0, 0, 0, 0.55]          // pill colour
@@ -43,11 +44,15 @@ enum Annotations {
     /// Render caption text to a detached CIImage using Core Text (thread-safe, no AppKit context).
     static func render(_ text: String, fontSize: CGFloat,
                        bold: Bool = true,
+                       fontName: String = "",
                        textColor: [Double] = [1, 1, 1, 1],
                        showBackground: Bool = true,
                        bgColor: [Double] = [0, 0, 0, 0.55]) -> (CIImage, CGSize)? {
         guard !text.isEmpty else { return nil }
-        let font = CTFontCreateWithName((bold ? "HelveticaNeue-Bold" : "HelveticaNeue") as CFString, fontSize, nil)
+        // A custom font family overrides the default; fall back to Helvetica Neue if the
+        // named font can't be created.
+        let family = fontName.isEmpty ? (bold ? "HelveticaNeue-Bold" : "HelveticaNeue") : fontName
+        let font = CTFontCreateWithName(family as CFString, fontSize, nil)
         func color(_ c: [Double]) -> CGColor {
             CGColor(red: c[0], green: c[1], blue: c[2], alpha: c.count > 3 ? c[3] : 1)
         }
@@ -90,7 +95,7 @@ enum Annotations {
             switch a.kind {
             case .text:
                 let fontSize = canvas.height * a.fontFraction
-                guard let (image, size) = render(a.text, fontSize: fontSize, bold: a.bold,
+                guard let (image, size) = render(a.text, fontSize: fontSize, bold: a.bold, fontName: a.fontName,
                                                  textColor: a.textColorRGBA, showBackground: a.showBackground,
                                                  bgColor: a.bgColorRGBA) else { return nil }
                 return RenderedAnnotation(annotation: a, image: image, pixelSize: size)

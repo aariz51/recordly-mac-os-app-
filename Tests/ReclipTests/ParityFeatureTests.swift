@@ -573,6 +573,26 @@ final class ParityFeatureTests: XCTestCase {
         }
     }
 
+    func testCustomFontRendersDistinctly() async throws {
+        // A monospace font renders "IIIIIIII" wider than a proportional default (different metrics).
+        let mono = Annotations.render("IIIIIIII", fontSize: 40, fontName: "Menlo-Regular")
+        let prop = Annotations.render("IIIIIIII", fontSize: 40, fontName: "")
+        let monoW = try XCTUnwrap(mono?.1.width)
+        let propW = try XCTUnwrap(prop?.1.width)
+        XCTAssertNotEqual(monoW, propW, accuracy: 0.5)   // custom font actually changed the metrics
+        // A bogus font name falls back gracefully (still renders).
+        XCTAssertNotNil(Annotations.render("x", fontSize: 30, fontName: "NoSuchFont-XYZ"))
+
+        // Round-trips through the project.
+        var a = Annotation(text: "Hi", start: 0, end: 1); a.kind = .text; a.fontName = "Menlo-Bold"
+        let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
+                                            style: StyleOptions(), zoom: ZoomTimeline(), webcam: WebcamSettings(),
+                                            annotations: [a], trimStart: 0, trimEnd: 0, speed: 1)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("font.reclip")
+        try project.save(to: url)
+        XCTAssertEqual(try ReclipProject.load(from: url).annotationList().first?.fontName, "Menlo-Bold")
+    }
+
     func testTextAnnotationTypography() async throws {
         let src = tmp("type-src.mp4"); try await makeVideo(src)
         var a = Annotation(text: "Styled", start: 0.1, end: 1.0)
