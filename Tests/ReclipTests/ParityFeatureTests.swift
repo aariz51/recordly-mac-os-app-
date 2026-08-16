@@ -154,6 +154,19 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testGifBounceRoughlyDoublesFrames() async throws {
+        let src = tmp("bounce-src.mp4"); try await makeVideo(src, seconds: 1.0, fps: 30)
+        let plain = tmp("bounce-off.gif")
+        try await GifExport.export(source: src, to: plain, style: StyleOptions(), fps: 8, bounce: false)
+        let bounced = tmp("bounce-on.gif")
+        try await GifExport.export(source: src, to: bounced, style: StyleOptions(), fps: 8, bounce: true)
+        let n1 = CGImageSourceGetCount(CGImageSourceCreateWithURL(plain as CFURL, nil)!)
+        let n2 = CGImageSourceGetCount(CGImageSourceCreateWithURL(bounced as CFURL, nil)!)
+        XCTAssertGreaterThan(n1, 1)
+        // forward (n) + interior reversed (n-2) = 2n-2
+        XCTAssertEqual(n2, 2 * n1 - 2, "ping-pong appends the interior frames reversed")
+    }
+
     func testGifSizePresetCapsWidth() async throws {
         let src = tmp("gs-src.mp4"); try await makeVideo(src, size: CGSize(width: 1600, height: 1000))
         let out = tmp("gs.gif")

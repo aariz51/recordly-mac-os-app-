@@ -34,6 +34,7 @@ enum GifExport {
                        fps: Double = 12,
                        maxWidth: CGFloat = 720,
                        loop: Bool = true,
+                       bounce: Bool = false,
                        progress: (@Sendable (Double) -> Void)? = nil) async throws {
         let tl = try await StyledExport.makeTimeline(source: source, style: style, zoom: zoom,
                                                      webcam: webcam, webcamSettings: webcamSettings,
@@ -49,10 +50,22 @@ enum GifExport {
         let length = tl.duration
         let frameCount = max(1, Int(length * fps))
 
+        // Render frames once.
+        var images: [CGImage] = []
+        for i in 0..<frameCount {
+            let t = CMTime(seconds: start + Double(i) / fps, preferredTimescale: 600)
+            images.append(try await generator.image(at: t).image)
+            progress?(Double(i + 1) / Double(frameCount))
+        }
+        // Ping-pong: append the interior frames reversed so it plays forward then back.
+        let sequence = (bounce && images.count > 2)
+            ? images + images[1..<(images.count - 1)].reversed()
+            : images
+
         try? FileManager.default.removeItem(at: output)
         guard let dest = CGImageDestinationCreateWithURL(output as CFURL,
                                                          UTType.gif.identifier as CFString,
-                                                         frameCount, nil) else {
+                                                         sequence.count, nil) else {
             throw StyledExportError.exportSessionFailed("could not create GIF destination")
         }
         // Loop count 0 = infinite; 1 = play once.
@@ -61,12 +74,8 @@ enum GifExport {
         CGImageDestinationSetProperties(dest, gifProps as CFDictionary)
         let frameProps = [kCGImagePropertyGIFDictionary as String:
                             [kCGImagePropertyGIFDelayTime as String: 1.0 / fps]]
-
-        for i in 0..<frameCount {
-            let t = CMTime(seconds: start + Double(i) / fps, preferredTimescale: 600)
-            let result = try await generator.image(at: t)
-            CGImageDestinationAddImage(dest, result.image, frameProps as CFDictionary)
-            progress?(Double(i + 1) / Double(frameCount))
+        for img in sequence {
+            CGImageDestinationAddImage(dest, img, frameProps as CFDictionary)
         }
 
         if !CGImageDestinationFinalize(dest) {
