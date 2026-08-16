@@ -47,7 +47,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 |---|---|---|
 | Trim | ✅ | StyledExport trim |
 | **Split clip / remove segment** | ✅ | `keepRanges` concatenates kept source ranges (CutMap-synced overlays); duration-verified |
-| **Clip model (per-clip speed grid, mute, volume, normalize)** | 🟡 | speed regions + mute + volume landed; split/normalize open |
+| **Clip model (per-clip speed grid, mute, volume, normalize)** | ✅ | speed regions + split/cut + mute + per-region volume + normalize all landed |
 | **Undo / redo** | ✅ | `EditorHistory` — bounded 100-entry stack, redo-clear on new edit, initialized/applied/unchanged/recorded results; unit-tested (UI keybinding pending) |
 | **Drag/resize regions on a timeline** | ❌ | UI (UI dev) |
 | Auto zoom (cursor) | ✅ | ZoomTimeline.autoZoom |
@@ -65,7 +65,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Image annotations | ✅ | Annotation.kind=.image (+ fade in/out) |
 | Arrow annotations (stroke, color, 8-dir) | ✅ | Annotation.kind=.arrow + arrowAngle (any direction) |
 | Blur / censor region | ✅ | Annotation.kind=.blur/.box |
-| **Audio mute + volume + normalize** | ✅ | mute, 0–2x volume, peak-normalize (AVAudioMix, RMS-verified); per-region volume still open |
+| **Audio mute + volume + normalize + per-region volume** | ✅ | mute, 0–2x volume, peak-normalize, per-region ducking (AVAudioMix ramps, windowed-RMS verified) |
 
 ## 4. Cursor polish engine  🟡 (v1 landed)
 Reclip now renders a stylized cursor (arrow/dot) from the tracked path with smooth
