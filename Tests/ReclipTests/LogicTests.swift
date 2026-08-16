@@ -163,6 +163,19 @@ final class AnnotationFadeTests: XCTestCase {
     }
 }
 
+final class CutMapTests: XCTestCase {
+    func testCutMapConcatenatesKeptRanges() {
+        // Keep [0,2] and [5,8] of a 10s source (cut out [2,5] and [8,10]).
+        let m = CutMap(keptRanges: [(0, 2), (5, 8)])
+        XCTAssertEqual(m.outputDuration, 5, accuracy: 1e-9)          // 2 + 3
+        XCTAssertEqual(m.sourceTime(forOutput: 0), 0, accuracy: 1e-9)
+        XCTAssertEqual(m.sourceTime(forOutput: 1.5), 1.5, accuracy: 1e-9)  // still in first kept range
+        XCTAssertEqual(m.sourceTime(forOutput: 2.5), 5.5, accuracy: 1e-9)  // 0.5 into the second kept range → 5 + 0.5
+        XCTAssertEqual(m.sourceTime(forOutput: 3.5), 6.5, accuracy: 1e-9)
+        XCTAssertEqual(m.sourceTime(forOutput: 5.0), 8.0, accuracy: 1e-9)
+    }
+}
+
 final class SpeedMapTests: XCTestCase {
     func testPiecewiseMappingAndDuration() {
         // 10s source, [0,4] played at 2×, rest 1×.

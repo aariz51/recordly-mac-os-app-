@@ -573,6 +573,26 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertEqual(loaded?.left ?? -1, 0.07, accuracy: 1e-9)
     }
 
+    func testCutRemovesMiddleSegment() async throws {
+        // 2s source; keep [0,0.5] and [1.5,2.0] → output ≈ 1.0s (cut out the middle 1s).
+        let src = tmp("cut-src.mp4"); try await makeVideo(src, seconds: 2.0)
+        let out = tmp("cut.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(), keepRanges: [0...0.5, 1.5...2.0])
+        let dur = try await AVURLAsset(url: out).load(.duration).seconds
+        XCTAssertEqual(dur, 1.0, accuracy: 0.15, "kept ranges total ~1s, got \(dur)s")
+        XCTAssertLessThan(dur, 1.6, "middle segment actually removed")
+        // Round-trips through the project file.
+        let project = ReclipProject.capture(source: src, style: StyleOptions(), zoom: ZoomTimeline(),
+                                            webcam: WebcamSettings(), annotations: [],
+                                            trimStart: 0, trimEnd: 0, speed: 1, keepRanges: [0...0.5, 1.5...2.0])
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cut.reclip")
+        try project.save(to: url)
+        let back = try ReclipProject.load(from: url).keepRangeList()
+        XCTAssertEqual(back.count, 2)
+        XCTAssertEqual(back.first?.upperBound ?? 0, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(back.last?.lowerBound ?? 0, 1.5, accuracy: 1e-9)
+    }
+
     func testSpeedRegionsChangeOutputDuration() async throws {
         // 2s source; first 1s played at 2×, rest at 1× → output ≈ 0.5 + 1.0 = 1.5s.
         let src = tmp("speedreg-src.mp4"); try await makeVideo(src, seconds: 2.0)

@@ -38,6 +38,7 @@ struct ReclipProject: Codable, Equatable {
     var trimEnd: Double
     var speed: Double
     var speedRegions: [SpeedSegment] = []
+    var keepRanges: [[Double]] = []
 
     // MARK: Nested codable DTOs
 
@@ -108,6 +109,7 @@ struct ReclipProject: Codable, Equatable {
                         webcam: WebcamSettings, annotations: [Annotation],
                         trimStart: Double, trimEnd: Double, speed: Double,
                         speedRegions: [SpeedSegment] = [],
+                        keepRanges: [ClosedRange<Double>] = [],
                         cursorStyle: CursorStyle = CursorStyle(),
                         captionCues: [CaptionCue] = [],
                         captionsEnabled: Bool = false) -> ReclipProject {
@@ -149,7 +151,12 @@ struct ReclipProject: Codable, Equatable {
                               spotlight: cursorStyle.spotlight, spotlightRadius: cursorStyle.spotlightRadius, spotlightDim: cursorStyle.spotlightDim),
             captionCues: captionCues.map { CueDTO(text: $0.text, start: $0.start, end: $0.end) },
             captionsEnabled: captionsEnabled,
-            trimStart: trimStart, trimEnd: trimEnd, speed: speed, speedRegions: speedRegions)
+            trimStart: trimStart, trimEnd: trimEnd, speed: speed, speedRegions: speedRegions,
+            keepRanges: keepRanges.map { [$0.lowerBound, $0.upperBound] })
+    }
+
+    func keepRangeList() -> [ClosedRange<Double>] {
+        keepRanges.compactMap { $0.count == 2 && $0[1] > $0[0] ? $0[0]...$0[1] : nil }
     }
 
     func style() -> StyleOptions {

@@ -193,6 +193,7 @@ enum StyledExport {
                              trim: CMTimeRange? = nil,
                              speed: Double = 1.0,
                              speedRegions: [SpeedSegment] = [],
+                             keepRanges: [ClosedRange<Double>] = [],
                              cursor: CursorTrack? = nil,
                              cursorStyle: CursorStyle = CursorStyle(),
                              captions: [CaptionCue] = [],
@@ -227,22 +228,42 @@ enum StyledExport {
                                                preferredTrackID: kCMPersistentTrackID_Invalid) else {
             throw StyledExportError.exportSessionFailed("could not create composition track")
         }
-        try compV.insertTimeRange(srcRange, of: vTrack, at: .zero)
+        // Multi-segment cut: insert only the kept source ranges, concatenated (empty = the
+        // whole srcRange). Overlays follow via a CutMap; cuts are exclusive of speed edits.
+        let insertRanges: [CMTimeRange] = keepRanges.isEmpty ? [srcRange]
+            : keepRanges.sorted { $0.lowerBound < $1.lowerBound }.compactMap {
+                let s = max(0, $0.lowerBound), e = min(fullDuration.seconds, $0.upperBound)
+                guard e - s > 0.001 else { return nil }
+                return CMTimeRange(start: CMTime(seconds: s, preferredTimescale: 600),
+                                   duration: CMTime(seconds: e - s, preferredTimescale: 600))
+            }
+        var insertAt = CMTime.zero
+        for r in insertRanges {
+            try? compV.insertTimeRange(r, of: vTrack, at: insertAt)
+            insertAt = insertAt + r.duration
+        }
         compV.preferredTransform = transform
         // Audio passes through unless muted (Recordly's mute control).
         if !style.muteAudio {
             for aTrack in try await srcAsset.loadTracks(withMediaType: .audio) {
                 if let compA = comp.addMutableTrack(withMediaType: .audio,
                                                     preferredTrackID: kCMPersistentTrackID_Invalid) {
-                    try? compA.insertTimeRange(srcRange, of: aTrack, at: .zero)
+                    var at = CMTime.zero
+                    for r in insertRanges {
+                        try? compA.insertTimeRange(r, of: aTrack, at: at)
+                        at = at + r.duration
+                    }
                 }
             }
         }
+        let cutMap: CutMap? = keepRanges.isEmpty ? nil
+            : CutMap(keptRanges: insertRanges.map { ($0.start.seconds, $0.start.seconds + $0.duration.seconds) })
 
         let clampedSpeed = max(0.25, min(speed, 4.0))
-        // Per-segment speed (overrides the single global speed when present).
+        // Per-segment speed (overrides the single global speed when present). Skipped when
+        // cutting, since cuts and speed edits are mutually exclusive.
         let trimStartSec = srcRange.start.seconds
-        let speedMap: SpeedMap? = speedRegions.isEmpty ? nil : SpeedMap(
+        let speedMap: SpeedMap? = (cutMap != nil || speedRegions.isEmpty) ? nil : SpeedMap(
             regions: speedRegions.map { SpeedSegment(start: $0.start - trimStartSec, end: $0.end - trimStartSec, speed: $0.speed) },
             sourceDuration: srcRange.duration.seconds)
         if let speedMap {
@@ -253,7 +274,7 @@ enum StyledExport {
                                         duration: CMTime(seconds: seg.end - seg.start, preferredTimescale: 600))
                 comp.scaleTimeRange(range, toDuration: CMTime(seconds: (seg.end - seg.start) / seg.speed, preferredTimescale: 600))
             }
-        } else if abs(clampedSpeed - 1.0) > 0.01 {
+        } else if cutMap == nil, abs(clampedSpeed - 1.0) > 0.01 {
             let scaled = CMTimeMultiplyByFloat64(srcRange.duration, multiplier: 1.0 / clampedSpeed)
             comp.scaleTimeRange(CMTimeRange(start: .zero, duration: srcRange.duration), toDuration: scaled)
         }
@@ -280,9 +301,16 @@ enum StyledExport {
         let crop = style.crop
 
         let video = AVMutableVideoComposition(asset: comp) { request in
-            // Output→source time: piecewise via the speed map, else the single-speed line.
-            let srcT = speedMap.map { trimStart + $0.sourceTime(forOutput: request.compositionTime.seconds) }
-                ?? (trimStart + request.compositionTime.seconds * clampedSpeed)
+            // Output→source time: cut map (concatenated kept ranges), else piecewise speed
+            // map, else the single-speed line.
+            let srcT: Double
+            if let cutMap {
+                srcT = cutMap.sourceTime(forOutput: request.compositionTime.seconds)
+            } else if let speedMap {
+                srcT = trimStart + speedMap.sourceTime(forOutput: request.compositionTime.seconds)
+            } else {
+                srcT = trimStart + request.compositionTime.seconds * clampedSpeed
+            }
             // Spotlight (dim around the cursor) then the stylized cursor, both in source
             // space so crop/zoom carry them.
             let lit = CursorRenderer.applySpotlight(on: request.sourceImage, track: cursor,
@@ -432,6 +460,7 @@ enum StyledExport {
                        annotations: [Annotation] = [],
                        speed: Double = 1.0,
                        speedRegions: [SpeedSegment] = [],
+                       keepRanges: [ClosedRange<Double>] = [],
                        quality: ExportQuality = .high,
                        cursor: CursorTrack? = nil,
                        cursorStyle: CursorStyle = CursorStyle(),
@@ -441,7 +470,7 @@ enum StyledExport {
         let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
                                         webcam: webcam, webcamSettings: webcamSettings,
                                         annotations: annotations, trim: trim, speed: speed,
-                                        speedRegions: speedRegions,
+                                        speedRegions: speedRegions, keepRanges: keepRanges,
                                         cursor: cursor, cursorStyle: cursorStyle,
                                         captions: captions, captionSettings: captionSettings)
         guard let export = AVAssetExportSession(asset: tl.asset, presetName: quality.preset) else {

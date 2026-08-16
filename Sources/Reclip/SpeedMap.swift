@@ -7,6 +7,36 @@ struct SpeedSegment: Equatable, Codable {
     var speed: Double
 }
 
+/// Maps output time ↔ source time when middle segments have been cut out (kept ranges
+/// concatenated). Lets the compositor keep overlays (keyed to source time) in sync with a
+/// cut timeline. Built from the list of surviving source ranges, in output order.
+struct CutMap: Equatable {
+    struct Segment: Equatable { var src: Double; var out: Double; var dur: Double }
+    let segments: [Segment]
+
+    /// Builds a CutMap from kept source ranges (as (start,end) seconds), concatenated.
+    init(keptRanges: [(Double, Double)]) {
+        var segs: [Segment] = []
+        var acc = 0.0
+        for (s, e) in keptRanges where e > s {
+            let d = e - s
+            segs.append(Segment(src: s, out: acc, dur: d))
+            acc += d
+        }
+        segments = segs
+    }
+
+    var outputDuration: Double { segments.reduce(0) { $0 + $1.dur } }
+
+    func sourceTime(forOutput t: Double) -> Double {
+        if t <= 0 { return segments.first?.src ?? 0 }
+        for s in segments where t <= s.out + s.dur + 1e-9 {
+            return s.src + (t - s.out)
+        }
+        return segments.last.map { $0.src + $0.dur } ?? 0
+    }
+}
+
 /// Piecewise time mapping for per-segment speed changes. Normalizes a set of speed regions
 /// into contiguous segments covering `[0, sourceDuration]` (gaps run at 1×), and maps output
 /// time ↔ source time so the compositor's overlays (zoom/cursor/captions, all keyed to source
