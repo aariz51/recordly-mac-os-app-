@@ -179,6 +179,17 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertGreaterThan(w, 100)
     }
 
+    func testSystemCursorExtraction() {
+        // The real macOS arrow cursor extracts to a non-empty sprite.
+        let sprite = SystemCursor.arrowSprite(size: 40)
+        XCTAssertNotNil(sprite)
+        if let e = sprite?.extent {
+            XCTAssertGreaterThan(e.width, 2)
+            XCTAssertGreaterThan(e.height, 2)
+        }
+        XCTAssertTrue(CursorStyle.Kind.allCases.contains(.system))
+    }
+
     func testCursorSpotlightDimsAwayFromCursor() {
         // Bright base; cursor at center. Spotlight should darken the corner but keep center bright.
         let base = CIImage(color: CIColor(red: 0.8, green: 0.8, blue: 0.8))

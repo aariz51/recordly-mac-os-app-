@@ -2,6 +2,20 @@ import Foundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreGraphics
+import AppKit
+
+/// Extracts the real macOS system cursor image (Recordly captures the OS cursor for
+/// authenticity, rather than always drawing a stylized one).
+enum SystemCursor {
+    static func arrowSprite(size: CGFloat) -> CIImage? {
+        let img = NSCursor.arrow.image
+        guard let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let cg = rep.cgImage, cg.height > 0 else { return nil }
+        let ci = CIImage(cgImage: cg)
+        let scale = (size * 1.5) / CGFloat(cg.height)   // match the drawn-arrow footprint
+        return ci.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+    }
+}
 
 /// A stylized cursor rendered from the recorded cursor track (used when the OS cursor
 /// was hidden during capture). Recordly-style cursor polish.
@@ -9,6 +23,7 @@ struct CursorStyle: Equatable {
     enum Kind: String, CaseIterable, Identifiable {
         case arrow
         case dot
+        case system   // the real macOS cursor image
         var id: String { rawValue }
     }
     var enabled = false
@@ -71,13 +86,14 @@ enum CursorRenderer {
         let tx: CGFloat
         let ty: CGFloat
         switch style.kind {
-        case .arrow: tx = px;              ty = py - s.height
-        case .dot:   tx = px - s.width / 2; ty = py - s.height / 2
+        case .arrow, .system: tx = px;              ty = py - s.height   // tip at top-left
+        case .dot:            tx = px - s.width / 2; ty = py - s.height / 2
         }
         return sprite.transformed(by: CGAffineTransform(translationX: tx, y: ty)).composited(over: image)
     }
 
     private static func makeSprite(kind: CursorStyle.Kind, size: CGFloat) -> CIImage? {
+        if kind == .system { return SystemCursor.arrowSprite(size: size) }
         let w = Int(ceil(size))
         let h = Int(ceil(size * (kind == .arrow ? 1.5 : 1.0)))
         guard w > 1, h > 1,
@@ -88,6 +104,7 @@ enum CursorRenderer {
         let W = CGFloat(w), H = CGFloat(h)
 
         switch kind {
+        case .system: return nil   // handled by the early return above; unreachable here
         case .dot:
             let inset = max(1, size * 0.06)
             ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 0.95))
