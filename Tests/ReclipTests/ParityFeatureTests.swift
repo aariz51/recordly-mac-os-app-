@@ -490,6 +490,21 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertEqual(loaded?.left ?? -1, 0.07, accuracy: 1e-9)
     }
 
+    func testMaxOutputHeightCapsResolution() async throws {
+        let src = tmp("cap-src.mp4"); try await makeVideo(src, size: CGSize(width: 1280, height: 800))
+        var s = StyleOptions(); s.maxOutputHeight = 480
+        let out = tmp("cap.mp4")
+        try await StyledExport.export(source: src, to: out, style: s)
+        let d = try await dims(out)
+        XCTAssertLessThanOrEqual(d.height, 482, "output height capped near 480, got \(d.height)")
+        XCTAssertGreaterThan(d.height, 400, "still a real downscale, not collapsed")
+        // Uncapped keeps the native size.
+        let out2 = tmp("uncap.mp4")
+        try await StyledExport.export(source: src, to: out2, style: StyleOptions())
+        let d2 = try await dims(out2)
+        XCTAssertGreaterThan(d2.height, 700, "uncapped stays near source height")
+    }
+
     func testRecordingValidation() async throws {
         // A real recording validates…
         let good = tmp("val-good.mp4"); try await makeVideo(good)

@@ -69,6 +69,7 @@ struct StyleOptions: Equatable {
     var deviceFrame: DeviceFrame = .none   // optional window/browser chrome around the footage
     var muteAudio: Bool = false            // drop the source audio from the export
     var audioVolume: Double = 1.0          // 0…2 gain applied to the source audio
+    var maxOutputHeight: Int? = nil        // cap output height (e.g. 1080/720); width scales with it
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
     struct CropInsets: Equatable {
@@ -205,9 +206,16 @@ enum StyledExport {
         // footage is then fit inside it and the background fills the rest. Sizing fits
         // within the source box (Recordly's calculateMp4SourceDimensions) so presets
         // don't upscale the source.
-        let canvas = ExportDimensions.canvas(sourceWidth: sourceSize.width,
-                                             sourceHeight: sourceSize.height,
-                                             ratio: style.aspect.ratio.map(Double.init))
+        let baseCanvas = ExportDimensions.canvas(sourceWidth: sourceSize.width,
+                                                 sourceHeight: sourceSize.height,
+                                                 ratio: style.aspect.ratio.map(Double.init))
+        // Optional output-resolution cap; fraction-based padding/corners scale with it.
+        let canvas: CGSize = {
+            guard let maxH = style.maxOutputHeight, baseCanvas.height > CGFloat(maxH) else { return baseCanvas }
+            let scale = CGFloat(maxH) / baseCanvas.height
+            return CGSize(width: (baseCanvas.width * scale / 2).rounded() * 2,
+                          height: (baseCanvas.height * scale / 2).rounded() * 2)
+        }()
         let fullDuration = try await srcAsset.load(.duration)
         let srcRange = trim ?? CMTimeRange(start: .zero, duration: fullDuration)
 
