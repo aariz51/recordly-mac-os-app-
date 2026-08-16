@@ -372,6 +372,7 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertFalse(frames.isEmpty)
         var wc = WebcamSettings(); wc.enabled = true; wc.cropZoom = 2.0
         wc.cropOffsetX = -0.8; wc.cropOffsetY = 0.6; wc.sizeFraction = 0.25   // pan to a corner
+        wc.timeOffset = 0.15                                                  // small sync shift
         let out = tmp("wcpan.mp4")
         try await StyledExport.export(source: src, to: out, style: StyleOptions(),
                                       webcam: frames, webcamSettings: wc)
@@ -379,7 +380,7 @@ final class ParityFeatureTests: XCTestCase {
     }
 
     func testWebcamCropZoomProjectRoundTrip() throws {
-        var wc = WebcamSettings(); wc.cropZoom = 1.75; wc.cropOffsetX = -0.4; wc.cropOffsetY = 0.3
+        var wc = WebcamSettings(); wc.cropZoom = 1.75; wc.cropOffsetX = -0.4; wc.cropOffsetY = 0.3; wc.timeOffset = -0.25
         let project = ReclipProject.capture(source: URL(fileURLWithPath: "/tmp/x.mp4"),
                                             style: StyleOptions(), zoom: ZoomTimeline(), webcam: wc,
                                             annotations: [], trimStart: 0, trimEnd: 0, speed: 1)
@@ -389,6 +390,7 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertEqual(w.cropZoom, 1.75, accuracy: 1e-9)
         XCTAssertEqual(w.cropOffsetX, -0.4, accuracy: 1e-9)
         XCTAssertEqual(w.cropOffsetY, 0.3, accuracy: 1e-9)
+        XCTAssertEqual(w.timeOffset, -0.25, accuracy: 1e-9)
     }
 
     func testDirectionalArrowsExport() async throws {

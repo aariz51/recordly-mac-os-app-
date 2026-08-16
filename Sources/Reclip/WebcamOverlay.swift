@@ -25,6 +25,7 @@ struct WebcamSettings: Equatable {
     var cropZoom: Double = 1.0        // 1 = full frame; >1 zooms into the center of the feed
     var cropOffsetX: Double = 0       // -1…1 pan within the feed (only meaningful when cropZoom>1)
     var cropOffsetY: Double = 0
+    var timeOffset: Double = 0        // seconds to shift the webcam track vs the screen (sync)
     var marginFraction: Double = 0.04 // gap from the frame edge, fraction of short side
     var roundness: Double = 1.0       // 1 = fully round, 0 = square corners
     var mirror: Bool = true           // selfie-style horizontal flip
@@ -80,7 +81,7 @@ enum WebcamOverlay {
                           webcam: WebcamFrames,
                           time: Double,
                           settings: WebcamSettings) -> CIImage {
-        guard settings.enabled, let cam = webcam.nearest(time) else { return base }
+        guard settings.enabled, let cam = webcam.nearest(time + settings.timeOffset) else { return base }
 
         let shortSide = min(canvas.width, canvas.height)
         let bw = shortSide * CGFloat(settings.sizeFraction)               // bubble width
