@@ -45,6 +45,9 @@ struct ReclipProject: Codable, Equatable {
         var enabled = false
         var kind = CursorStyle.Kind.arrow.rawValue
         var size = 1.0
+        var spotlight = false
+        var spotlightRadius = 0.18
+        var spotlightDim = 0.55
     }
     struct CueDTO: Codable, Equatable { var text: String; var start: Double; var end: Double }
 
@@ -141,7 +144,8 @@ struct ReclipProject: Codable, Equatable {
                     bold: $0.bold, textColor: $0.textColorRGBA, showBg: $0.showBackground, bgColor: $0.bgColorRGBA,
                     arrowAngle: $0.arrowAngle)
             },
-            cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size),
+            cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size,
+                              spotlight: cursorStyle.spotlight, spotlightRadius: cursorStyle.spotlightRadius, spotlightDim: cursorStyle.spotlightDim),
             captionCues: captionCues.map { CueDTO(text: $0.text, start: $0.start, end: $0.end) },
             captionsEnabled: captionsEnabled,
             trimStart: trimStart, trimEnd: trimEnd, speed: speed, speedRegions: speedRegions)
@@ -215,6 +219,9 @@ struct ReclipProject: Codable, Equatable {
         cs.enabled = cursor.enabled
         cs.kind = CursorStyle.Kind(rawValue: cursor.kind) ?? .arrow
         cs.size = cursor.size
+        cs.spotlight = cursor.spotlight
+        cs.spotlightRadius = cursor.spotlightRadius
+        cs.spotlightDim = cursor.spotlightDim
         return cs
     }
 

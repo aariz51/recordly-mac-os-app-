@@ -166,6 +166,27 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertGreaterThan(w, 100)
     }
 
+    func testCursorSpotlightDimsAwayFromCursor() {
+        // Bright base; cursor at center. Spotlight should darken the corner but keep center bright.
+        let base = CIImage(color: CIColor(red: 0.8, green: 0.8, blue: 0.8))
+            .cropped(to: CGRect(x: 0, y: 0, width: 200, height: 200))
+        var track = CursorTrack(); track.samples = [CursorSample(t: 0, x: 0.5, y: 0.5)]
+        var cs = CursorStyle(); cs.enabled = true; cs.spotlight = true; cs.spotlightRadius = 0.12; cs.spotlightDim = 0.6
+        let lit = CursorRenderer.applySpotlight(on: base, track: track, time: 0, style: cs)
+
+        let ctx = CIContext()
+        func luma(_ img: CIImage, _ x: Int, _ y: Int) -> Int {
+            var px = [UInt8](repeating: 0, count: 4)
+            ctx.render(img, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: x, y: y, width: 1, height: 1),
+                       format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+            return Int(px[0])
+        }
+        let center = luma(lit, 100, 100)
+        let corner = luma(lit, 4, 4)
+        XCTAssertGreaterThan(center, corner + 40, "spotlight keeps the cursor area brighter than the corner")
+        XCTAssertGreaterThan(center, 150, "cursor area stays near full brightness")
+    }
+
     func testCursorOverlayExports() async throws {
         let src = tmp("cur-src.mp4"); try await makeVideo(src)
         var track = CursorTrack()

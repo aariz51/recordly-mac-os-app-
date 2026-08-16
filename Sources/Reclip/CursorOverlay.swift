@@ -1,5 +1,6 @@
 import Foundation
 import CoreImage
+import CoreImage.CIFilterBuiltins
 import CoreGraphics
 
 /// A stylized cursor rendered from the recorded cursor track (used when the OS cursor
@@ -13,9 +14,42 @@ struct CursorStyle: Equatable {
     var enabled = false
     var kind: Kind = .arrow
     var size: Double = 1.0    // multiplier over the base cursor size
+    var spotlight = false          // dim everything except a soft circle around the cursor
+    var spotlightRadius = 0.18     // circle radius as a fraction of the frame's short side
+    var spotlightDim = 0.55        // how much to darken outside the circle (0…1)
 }
 
 enum CursorRenderer {
+
+    /// Dims the frame except a soft circle around the cursor (a spotlight that draws the
+    /// eye to the pointer). Applied in source space so crop/zoom carry it, like the cursor.
+    static func applySpotlight(on image: CIImage, track: CursorTrack?, time: Double, style: CursorStyle) -> CIImage {
+        guard style.spotlight, let pos = track?.interpolated(at: time) else { return image }
+        let ext = image.extent
+        guard ext.width > 0, ext.height > 0 else { return image }
+        let px = ext.minX + CGFloat(min(max(pos.x, 0), 1)) * ext.width
+        let py = ext.minY + (1 - CGFloat(min(max(pos.y, 0), 1))) * ext.height
+        let r = min(ext.width, ext.height) * CGFloat(max(0.03, min(style.spotlightRadius, 0.9)))
+
+        let grad = CIFilter.radialGradient()
+        grad.center = CGPoint(x: px, y: py)
+        grad.radius0 = Float(r)
+        grad.radius1 = Float(r * 1.8)
+        grad.color0 = CIColor.white
+        grad.color1 = CIColor.black
+        let mask = (grad.outputImage ?? CIImage(color: .white)).cropped(to: ext)
+
+        let dim = CIFilter.colorControls()
+        dim.inputImage = image
+        dim.brightness = -Float(max(0, min(style.spotlightDim, 1)))
+        let dark = (dim.outputImage ?? image).cropped(to: ext)
+
+        let blend = CIFilter.blendWithMask()
+        blend.inputImage = image          // full-bright inside the circle
+        blend.backgroundImage = dark      // dimmed outside
+        blend.maskImage = mask
+        return (blend.outputImage ?? image).cropped(to: ext)
+    }
 
     /// Composites the stylized cursor onto the (uncropped, unzoomed) source frame so it
     /// inherits the same crop/zoom/placement transforms as the footage.

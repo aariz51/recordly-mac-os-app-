@@ -283,8 +283,11 @@ enum StyledExport {
             // Output→source time: piecewise via the speed map, else the single-speed line.
             let srcT = speedMap.map { trimStart + $0.sourceTime(forOutput: request.compositionTime.seconds) }
                 ?? (trimStart + request.compositionTime.seconds * clampedSpeed)
-            // Draw the stylized cursor in source space first, so crop/zoom carry it.
-            let withCursor = CursorRenderer.draw(on: request.sourceImage, track: cursor,
+            // Spotlight (dim around the cursor) then the stylized cursor, both in source
+            // space so crop/zoom carry them.
+            let lit = CursorRenderer.applySpotlight(on: request.sourceImage, track: cursor,
+                                                    time: srcT, style: cursorStyle)
+            let withCursor = CursorRenderer.draw(on: lit, track: cursor,
                                                  time: srcT, style: cursorStyle)
             let frame = applyCrop(withCursor, crop)
             // Background is either the static solid/gradient, or a blurred fill of the frame.
