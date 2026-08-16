@@ -490,6 +490,42 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertEqual(loaded?.left ?? -1, 0.07, accuracy: 1e-9)
     }
 
+    func testRecordingValidation() async throws {
+        // A real recording validates…
+        let good = tmp("val-good.mp4"); try await makeVideo(good)
+        let goodStatus = await RecordingValidator.validate(good)
+        XCTAssertTrue(goodStatus.isValid)
+        // …a zero-byte file is 'empty'…
+        let empty = tmp("val-empty.mp4"); FileManager.default.createFile(atPath: empty.path, contents: Data())
+        let emptyStatus = await RecordingValidator.validate(empty)
+        XCTAssertEqual(emptyStatus, .empty)
+        // …and garbage bytes are 'unreadable'.
+        let junk = tmp("val-junk.mp4"); try Data([1, 2, 3, 4, 5, 6, 7, 8]).write(to: junk)
+        let junkStatus = await RecordingValidator.validate(junk)
+        XCTAssertFalse(junkStatus.isValid)
+        for u in [good, empty, junk] { try? FileManager.default.removeItem(at: u) }
+    }
+
+    func testPruneRemovesIncompleteAndOrphans() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("reclip-prune-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let goodMovie = dir.appendingPathComponent("Reclip-good.mp4")
+        try await makeVideo(goodMovie)
+        try Data().write(to: dir.appendingPathComponent("Reclip-crashed.mp4"))          // empty → prune
+        try "cursor".data(using: .utf8)!.write(to: goodMovie.deletingPathExtension().appendingPathExtension("cursor")) // keep (matches good)
+        try "orphan".data(using: .utf8)!.write(to: dir.appendingPathComponent("Reclip-gone.cursor"))  // orphan → prune
+
+        let removed = await RecordingValidator.prune(in: dir)
+        let names = Set(removed.map { $0.lastPathComponent })
+        XCTAssertTrue(names.contains("Reclip-crashed.mp4"), "empty recording pruned")
+        XCTAssertTrue(names.contains("Reclip-gone.cursor"), "orphaned sidecar pruned")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: goodMovie.path), "valid recording kept")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: goodMovie.deletingPathExtension().appendingPathExtension("cursor").path),
+                      "sidecar of a valid recording kept")
+    }
+
     func testDeviceFrameExports() async throws {
         let src = tmp("frame-src.mp4"); try await makeVideo(src)
         for frame in [DeviceFrame.macOS, .browser] {
