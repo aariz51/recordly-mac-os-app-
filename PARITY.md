@@ -62,7 +62,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 |---|---|---|
 | Text captions | ✅ | Annotations |
 | **Text typography (weight/color/bg toggle+color)** | ✅ | weight, text colour, pill on/off + colour (font-family/align still fixed) |
-| Image annotations | ✅ | Annotation.kind=.image |
+| Image annotations | ✅ | Annotation.kind=.image (+ fade in/out) |
 | Arrow annotations (stroke, color, 8-dir) | ✅ | Annotation.kind=.arrow + arrowAngle (any direction) |
 | Blur / censor region | ✅ | Annotation.kind=.blur/.box |
 | **Audio mute + volume + normalize** | ✅ | mute, 0–2x volume, peak-normalize (AVAudioMix, RMS-verified); per-region volume still open |
