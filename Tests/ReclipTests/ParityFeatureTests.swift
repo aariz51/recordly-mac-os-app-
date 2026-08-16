@@ -336,6 +336,19 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertLessThan(quietRMS, loudRMS * 0.6, "0.25 gain should be clearly quieter than 1.0")
     }
 
+    func testNormalizeAudioBoostsQuietTrack() async throws {
+        let src = tmp("norm-src.mp4"); try await makeVideoWithAudio(src, seconds: 1.0, tone: true)  // ~half-scale tone
+        let plainURL = tmp("norm-plain.mp4")
+        try await StyledExport.export(source: src, to: plainURL, style: StyleOptions())
+        var s = StyleOptions(); s.normalizeAudio = true
+        let normURL = tmp("norm-on.mp4")
+        try await StyledExport.export(source: src, to: normURL, style: s)
+        let plainRMS = try await audioRMS(plainURL)
+        let normRMS = try await audioRMS(normURL)
+        XCTAssertGreaterThan(plainRMS, 50)
+        XCTAssertGreaterThan(normRMS, plainRMS * 1.3, "normalize should lift the half-scale tone toward full scale")
+    }
+
     func testMuteAudioDropsTrack() async throws {
         let src = tmp("mute-src.mp4"); try await makeVideoWithAudio(src)
         let srcAudio = try await AVURLAsset(url: src).loadTracks(withMediaType: .audio).count

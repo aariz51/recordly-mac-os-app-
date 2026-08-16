@@ -70,6 +70,7 @@ struct StyleOptions: Equatable {
     var deviceFrame: DeviceFrame = .none   // optional window/browser chrome around the footage
     var muteAudio: Bool = false            // drop the source audio from the export
     var audioVolume: Double = 1.0          // 0…2 gain applied to the source audio
+    var normalizeAudio: Bool = false       // auto-boost quiet audio toward full scale
     var maxOutputHeight: Int? = nil        // cap output height (e.g. 1080/720); width scales with it
 
     /// Fraction of each edge trimmed from the recorded frame (0…0.5 each).
@@ -313,21 +314,57 @@ enum StyledExport {
         }
         video.renderSize = canvas
 
-        // Optional audio-gain mix (Recordly's volume control).
+        // Optional audio-gain mix (Recordly's volume + normalize controls).
         var audioMix: AVAudioMix? = nil
-        if !style.muteAudio, abs(style.audioVolume - 1.0) > 0.001 {
-            let audioTracks = comp.tracks(withMediaType: .audio)
-            if !audioTracks.isEmpty {
-                let mix = AVMutableAudioMix()
-                mix.inputParameters = audioTracks.map { track in
-                    let p = AVMutableAudioMixInputParameters(track: track)
-                    p.setVolume(Float(max(0, min(style.audioVolume, 2.0))), at: .zero)
-                    return p
+        if !style.muteAudio {
+            // Normalize: bring the loudest peak up toward full scale, then apply user gain.
+            var gain = style.audioVolume
+            if style.normalizeAudio {
+                gain *= await Self.normalizationGain(for: srcAsset, range: srcRange)
+            }
+            if abs(gain - 1.0) > 0.001 {
+                let audioTracks = comp.tracks(withMediaType: .audio)
+                if !audioTracks.isEmpty {
+                    let mix = AVMutableAudioMix()
+                    mix.inputParameters = audioTracks.map { track in
+                        let p = AVMutableAudioMixInputParameters(track: track)
+                        p.setVolume(Float(max(0, min(gain, 4.0))), at: .zero)
+                        return p
+                    }
+                    audioMix = mix
                 }
-                audioMix = mix
             }
         }
         return StyledTimeline(asset: comp, video: video, duration: comp.duration.seconds, audioMix: audioMix)
+    }
+
+    /// Peak-normalization gain: scans the source audio for its loudest 16-bit sample and
+    /// returns the gain that lifts it to ~0.95 full-scale (clamped 1…4). 1.0 if no/loud audio.
+    private static func normalizationGain(for asset: AVURLAsset, range: CMTimeRange) async -> Double {
+        guard let track = try? await asset.loadTracks(withMediaType: .audio).first,
+              let reader = try? AVAssetReader(asset: asset) else { return 1.0 }
+        reader.timeRange = range
+        let out = AVAssetReaderTrackOutput(track: track, outputSettings: [
+            AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false, AVLinearPCMIsBigEndianKey: false,
+            AVLinearPCMIsNonInterleaved: false])
+        guard reader.canAdd(out) else { return 1.0 }
+        reader.add(out)
+        guard reader.startReading() else { return 1.0 }
+        var peak: Int16 = 0
+        while reader.status == .reading, let sb = out.copyNextSampleBuffer() {
+            guard let bb = CMSampleBufferGetDataBuffer(sb) else { continue }
+            var len = 0; var ptr: UnsafeMutablePointer<Int8>?
+            CMBlockBufferGetDataPointer(bb, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &len, dataPointerOut: &ptr)
+            if let ptr, len > 1 {
+                ptr.withMemoryRebound(to: Int16.self, capacity: len / 2) { p in
+                    for i in 0..<(len / 2) { let a = Int16(truncatingIfNeeded: abs(Int(p[i]))); if a > peak { peak = a } }
+                }
+            }
+        }
+        guard peak > 0 else { return 1.0 }
+        let target = 0.95 * Double(Int16.max)
+        return min(4.0, max(1.0, target / Double(peak)))
     }
 
     /// Aspect-fills the frame across the whole canvas, blurred and darkened, as a backdrop.
