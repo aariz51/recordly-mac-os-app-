@@ -191,6 +191,7 @@ enum StyledExport {
                              annotations: [Annotation] = [],
                              trim: CMTimeRange? = nil,
                              speed: Double = 1.0,
+                             speedRegions: [SpeedSegment] = [],
                              cursor: CursorTrack? = nil,
                              cursorStyle: CursorStyle = CursorStyle(),
                              captions: [CaptionCue] = [],
@@ -238,7 +239,20 @@ enum StyledExport {
         }
 
         let clampedSpeed = max(0.25, min(speed, 4.0))
-        if abs(clampedSpeed - 1.0) > 0.01 {
+        // Per-segment speed (overrides the single global speed when present).
+        let trimStartSec = srcRange.start.seconds
+        let speedMap: SpeedMap? = speedRegions.isEmpty ? nil : SpeedMap(
+            regions: speedRegions.map { SpeedSegment(start: $0.start - trimStartSec, end: $0.end - trimStartSec, speed: $0.speed) },
+            sourceDuration: srcRange.duration.seconds)
+        if let speedMap {
+            // Scale each non-1× segment. Right-to-left so a segment's composition range
+            // still equals its source range when it's processed (left side unscaled).
+            for seg in speedMap.segments.reversed() where abs(seg.speed - 1) > 1e-6 {
+                let range = CMTimeRange(start: CMTime(seconds: seg.start, preferredTimescale: 600),
+                                        duration: CMTime(seconds: seg.end - seg.start, preferredTimescale: 600))
+                comp.scaleTimeRange(range, toDuration: CMTime(seconds: (seg.end - seg.start) / seg.speed, preferredTimescale: 600))
+            }
+        } else if abs(clampedSpeed - 1.0) > 0.01 {
             let scaled = CMTimeMultiplyByFloat64(srcRange.duration, multiplier: 1.0 / clampedSpeed)
             comp.scaleTimeRange(CMTimeRange(start: .zero, duration: srcRange.duration), toDuration: scaled)
         }
@@ -265,7 +279,9 @@ enum StyledExport {
         let crop = style.crop
 
         let video = AVMutableVideoComposition(asset: comp) { request in
-            let srcT = trimStart + request.compositionTime.seconds * clampedSpeed
+            // Output→source time: piecewise via the speed map, else the single-speed line.
+            let srcT = speedMap.map { trimStart + $0.sourceTime(forOutput: request.compositionTime.seconds) }
+                ?? (trimStart + request.compositionTime.seconds * clampedSpeed)
             // Draw the stylized cursor in source space first, so crop/zoom carry it.
             let withCursor = CursorRenderer.draw(on: request.sourceImage, track: cursor,
                                                  time: srcT, style: cursorStyle)
@@ -375,6 +391,7 @@ enum StyledExport {
                        webcamSettings: WebcamSettings = WebcamSettings(),
                        annotations: [Annotation] = [],
                        speed: Double = 1.0,
+                       speedRegions: [SpeedSegment] = [],
                        quality: ExportQuality = .high,
                        cursor: CursorTrack? = nil,
                        cursorStyle: CursorStyle = CursorStyle(),
@@ -384,6 +401,7 @@ enum StyledExport {
         let tl = try await makeTimeline(source: source, style: style, zoom: zoom,
                                         webcam: webcam, webcamSettings: webcamSettings,
                                         annotations: annotations, trim: trim, speed: speed,
+                                        speedRegions: speedRegions,
                                         cursor: cursor, cursorStyle: cursorStyle,
                                         captions: captions, captionSettings: captionSettings)
         guard let export = AVAssetExportSession(asset: tl.asset, presetName: quality.preset) else {

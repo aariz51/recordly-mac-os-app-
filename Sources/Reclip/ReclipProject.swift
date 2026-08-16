@@ -36,6 +36,7 @@ struct ReclipProject: Codable, Equatable {
     var trimStart: Double
     var trimEnd: Double
     var speed: Double
+    var speedRegions: [SpeedSegment] = []
 
     // MARK: Nested codable DTOs
 
@@ -101,6 +102,7 @@ struct ReclipProject: Codable, Equatable {
     static func capture(source: URL, style: StyleOptions, zoom: ZoomTimeline,
                         webcam: WebcamSettings, annotations: [Annotation],
                         trimStart: Double, trimEnd: Double, speed: Double,
+                        speedRegions: [SpeedSegment] = [],
                         cursorStyle: CursorStyle = CursorStyle(),
                         captionCues: [CaptionCue] = [],
                         captionsEnabled: Bool = false) -> ReclipProject {
@@ -140,7 +142,7 @@ struct ReclipProject: Codable, Equatable {
             cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size),
             captionCues: captionCues.map { CueDTO(text: $0.text, start: $0.start, end: $0.end) },
             captionsEnabled: captionsEnabled,
-            trimStart: trimStart, trimEnd: trimEnd, speed: speed)
+            trimStart: trimStart, trimEnd: trimEnd, speed: speed, speedRegions: speedRegions)
     }
 
     func style() -> StyleOptions {

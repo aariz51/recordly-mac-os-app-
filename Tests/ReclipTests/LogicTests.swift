@@ -150,6 +150,49 @@ final class TimeMapTests: XCTestCase {
     }
 }
 
+final class SpeedMapTests: XCTestCase {
+    func testPiecewiseMappingAndDuration() {
+        // 10s source, [0,4] played at 2×, rest 1×.
+        let m = SpeedMap(regions: [SpeedSegment(start: 0, end: 4, speed: 2)], sourceDuration: 10)
+        XCTAssertEqual(m.outputDuration, 8, accuracy: 1e-9)          // 4/2 + 6/1
+        XCTAssertEqual(m.sourceTime(forOutput: 0), 0, accuracy: 1e-9)
+        XCTAssertEqual(m.sourceTime(forOutput: 2), 4, accuracy: 1e-9) // end of the fast part
+        XCTAssertEqual(m.sourceTime(forOutput: 3), 5, accuracy: 1e-9)
+        XCTAssertEqual(m.sourceTime(forOutput: 8), 10, accuracy: 1e-9)
+        XCTAssertFalse(m.isIdentity)
+    }
+
+    func testGapsFilledAtNormalSpeed() {
+        // A slow region in the middle; ends run at 1×.
+        let m = SpeedMap(regions: [SpeedSegment(start: 4, end: 6, speed: 0.5)], sourceDuration: 10)
+        // segments: [0,4]@1, [4,6]@0.5, [6,10]@1  → output 4 + 4 + 4 = 12
+        XCTAssertEqual(m.segments.count, 3)
+        XCTAssertEqual(m.outputDuration, 12, accuracy: 1e-9)
+        // output 5 → still in first 1× segment → source 5; output 4 → source 4 (start of slow)
+        XCTAssertEqual(m.sourceTime(forOutput: 4), 4, accuracy: 1e-9)
+        XCTAssertEqual(m.sourceTime(forOutput: 6), 5, accuracy: 1e-9) // 2s into 0.5× = 1s source
+    }
+
+    func testIdentityWhenNoRegions() {
+        let m = SpeedMap(regions: [], sourceDuration: 5)
+        XCTAssertTrue(m.isIdentity)
+        XCTAssertEqual(m.outputDuration, 5, accuracy: 1e-9)
+        XCTAssertEqual(m.sourceTime(forOutput: 2.5), 2.5, accuracy: 1e-9)
+    }
+
+    func testMonotonicMapping() {
+        let m = SpeedMap(regions: [SpeedSegment(start: 1, end: 3, speed: 3),
+                                   SpeedSegment(start: 5, end: 7, speed: 0.5)], sourceDuration: 8)
+        var prev = -1.0
+        var t = 0.0
+        while t <= m.outputDuration {
+            let s = m.sourceTime(forOutput: t)
+            XCTAssertGreaterThanOrEqual(s + 1e-9, prev, "source time must be non-decreasing")
+            prev = s; t += 0.1
+        }
+    }
+}
+
 final class CaptionExportTests: XCTestCase {
     func testSRTAndVTTFormat() {
         let cues = [CaptionCue(text: "Hello", start: 1.0, end: 3.5),

@@ -526,6 +526,30 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertEqual(loaded?.left ?? -1, 0.07, accuracy: 1e-9)
     }
 
+    func testSpeedRegionsChangeOutputDuration() async throws {
+        // 2s source; first 1s played at 2×, rest at 1× → output ≈ 0.5 + 1.0 = 1.5s.
+        let src = tmp("speedreg-src.mp4"); try await makeVideo(src, seconds: 2.0)
+        let regions = [SpeedSegment(start: 0, end: 1.0, speed: 2.0)]
+        let expected = SpeedMap(regions: regions, sourceDuration: 2.0).outputDuration
+        let out = tmp("speedreg.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(), speedRegions: regions)
+        let dur = try await AVURLAsset(url: out).load(.duration).seconds
+        XCTAssertEqual(dur, expected, accuracy: 0.15, "speed-region output duration should match the SpeedMap (\(expected)s), got \(dur)s")
+        // Sanity: it is shorter than the untouched 2s source.
+        XCTAssertLessThan(dur, 1.85)
+
+        // Round-trips through the project file.
+        let project = ReclipProject.capture(source: src, style: StyleOptions(), zoom: ZoomTimeline(),
+                                            webcam: WebcamSettings(), annotations: [],
+                                            trimStart: 0, trimEnd: 0, speed: 1, speedRegions: regions)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("speedreg.reclip")
+        try project.save(to: url)
+        let back = try ReclipProject.load(from: url).speedRegions
+        XCTAssertEqual(back.count, 1)
+        XCTAssertEqual(back.first?.speed ?? 0, 2.0, accuracy: 1e-9)
+        XCTAssertEqual(back.first?.end ?? 0, 1.0, accuracy: 1e-9)
+    }
+
     func testMaxOutputHeightCapsResolution() async throws {
         let src = tmp("cap-src.mp4"); try await makeVideo(src, size: CGSize(width: 1280, height: 800))
         var s = StyleOptions(); s.maxOutputHeight = 480
