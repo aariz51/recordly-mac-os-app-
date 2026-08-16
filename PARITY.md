@@ -117,6 +117,13 @@ the karaoke-highlight foundation). Still missing: the caption *editing UI*, kara
 *rendering* (needs your eyes on the animation), and (for App Store) linking whisper.cpp as a
 library instead of a subprocess.
 
+## 7b. Extensions
+| Feature | Reclip | Note |
+|---|---|---|
+| **Manifest + permission model** | ✅ | `ExtensionManifest` + validate + `ExtensionRegistry` permission gating |
+| **Render-hook runtime (7 phases)** | ✅ | `ReclipExtension` + `ExtensionHost` wired into compositor; tint extension verified |
+| **Remote-JS loading + marketplace** | ⛔ | out of scope — App Store §2.5.2 bans runtime remote code |
+
 ## 8. Export
 | Feature | Reclip | Note |
 |---|---|---|
