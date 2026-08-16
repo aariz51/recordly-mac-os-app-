@@ -22,6 +22,16 @@ enum Motion {
         reduce ? .easeOut(duration: 0.15) : .timingCurve(0.23, 1, 0.32, 1, duration: 0.22)
     }
 
+    /// The mirror of `enter`, run shorter. Two rules point in what looks like
+    /// opposite directions: a thing should leave along the path it arrived on
+    /// (spatial consistency), and the system's response should be quicker than
+    /// the user's decision (asymmetric timing). They only conflict if you read
+    /// "faster exit" as "different exit" — the resolution is the same path in
+    /// less time, not a path deleted.
+    static func exit(_ reduce: Bool) -> Animation {
+        reduce ? .easeOut(duration: 0.12) : .timingCurve(0.23, 1, 0.32, 1, duration: 0.16)
+    }
+
     /// Something already on screen moving or morphing in place.
     static func move(_ reduce: Bool) -> Animation {
         reduce ? .easeOut(duration: 0.15) : .timingCurve(0.77, 0, 0.175, 1, duration: 0.24)
@@ -52,19 +62,29 @@ func rubberband(_ overshoot: CGFloat, dimension: CGFloat, constant: CGFloat = 0.
 }
 
 extension AnyTransition {
-    /// Enters by rising into place, leaves by fading — exits are faster than entrances.
-    /// Nothing scales from zero; real things never appear out of nothing.
+    /// Rises into place, and leaves back down the way it came.
+    ///
+    /// Nothing scales from zero; real things never appear out of nothing. And
+    /// nothing leaves by a different door than it entered — if a card slid up
+    /// into view and then dissolves in place, the eye is told the thing was
+    /// destroyed rather than put back, which is the wrong story for a panel
+    /// that will return. Same path both ways; `Motion.exit` supplies the speed
+    /// difference instead of the geometry doing it.
     static func rise(_ reduce: Bool, distance: CGFloat = 10) -> AnyTransition {
         guard !reduce else { return .opacity }
-        return .asymmetric(
-            insertion: .opacity.combined(with: .offset(y: distance)).combined(with: .scale(scale: 0.98)),
-            removal: .opacity.combined(with: .scale(scale: 0.98)))
+        let path = AnyTransition.opacity
+            .combined(with: .offset(y: distance))
+            .combined(with: .scale(scale: 0.98))
+        return .asymmetric(insertion: path.animation(Motion.enter(false)),
+                           removal: path.animation(Motion.exit(false)))
     }
 
     /// For list rows that are added and removed rapidly.
     static func row(_ reduce: Bool) -> AnyTransition {
         guard !reduce else { return .opacity }
-        return .asymmetric(insertion: .opacity.combined(with: .offset(y: -6)), removal: .opacity)
+        let path = AnyTransition.opacity.combined(with: .offset(y: -6))
+        return .asymmetric(insertion: path.animation(Motion.enter(false)),
+                           removal: path.animation(Motion.exit(false)))
     }
 }
 
@@ -151,21 +171,69 @@ extension View {
 /// A grouped card. Sits on the opaque window canvas rather than stacking one
 /// translucent surface on another, and carries a bright top edge so it reads as
 /// a material catching light.
+///
+/// The edge is a *gradient* border at rest — light catching a surface, not a
+/// drawn outline. Under Increase Contrast that reading is a luxury the user has
+/// explicitly declined, so the same edge becomes a flat, defined line: grouping
+/// you can see rather than grouping you can sense.
 struct CardSurface: ViewModifier {
     var padding: CGFloat = Space.l
     var radius: CGFloat = Radius.card
 
+    @Environment(\.colorSchemeContrast) private var contrast
+
     func body(content: Content) -> some View {
-        content
+        let high = contrast == .increased
+        return content
             .padding(padding)
-            .background(Color.primary.opacity(0.045),
+            .background(Color.primary.opacity(high ? 0.09 : 0.045),
                         in: RoundedRectangle(cornerRadius: radius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .strokeBorder(
-                        LinearGradient(colors: [Color.primary.opacity(0.14), Color.primary.opacity(0.04)],
-                                       startPoint: .top, endPoint: .bottom),
+                        LinearGradient(
+                            colors: high
+                                ? [Color.primary.opacity(0.45), Color.primary.opacity(0.45)]
+                                : [Color.primary.opacity(0.14), Color.primary.opacity(0.04)],
+                            startPoint: .top, endPoint: .bottom),
                         lineWidth: 1))
+    }
+}
+
+/// Floating chrome — a translucent layer with content passing beneath it.
+///
+/// Reduced Transparency is its own accessibility signal, independent of Reduced
+/// Motion, and the app was answering neither of the two it uses. The correct
+/// answer is not "remove the layer": the layer is doing structural work: it is
+/// "make the material frostier" — raise the opacity to solid and drop the blur,
+/// then give it the defined edge the blur was previously providing for free.
+struct ChromeSurface<S: InsettableShape>: ViewModifier {
+    let shape: S
+    let material: Material
+    /// What the layer becomes when translucency is declined. It has to be picked
+    /// per site, because a bar on the window canvas and a pill over video are
+    /// solid in two very different directions.
+    let solid: Color
+
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        content.background {
+            if reduceTransparency {
+                shape.fill(solid)
+                    .overlay(shape.strokeBorder(Color.primary.opacity(0.22), lineWidth: 1))
+            } else {
+                shape.fill(material)
+            }
+        }
+    }
+}
+
+extension View {
+    func chrome<S: InsettableShape>(_ shape: S,
+                                    material: Material = .regularMaterial,
+                                    solid: Color) -> some View {
+        modifier(ChromeSurface(shape: shape, material: material, solid: solid))
     }
 }
 
@@ -359,22 +427,50 @@ struct ProgressTrack: View {
     /// 0...1, or nil while the work has started but has no measurable progress yet.
     let fraction: Double?
 
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var sweeping = false
+
     var body: some View {
         Capsule()
             .fill(Color.primary.opacity(0.12))
             .frame(height: 4)
             .overlay(alignment: .leading) {
                 GeometryReader { geo in
-                    Capsule()
-                        .fill(Palette.accent)
-                        .frame(width: geo.size.width)
-                        .scaleEffect(x: CGFloat(min(max(fraction ?? 0.03, 0.015), 1)),
-                                     y: 1,
-                                     anchor: .leading)
+                    if let fraction {
+                        Capsule()
+                            .fill(Palette.accent)
+                            .frame(width: geo.size.width)
+                            .scaleEffect(x: CGFloat(min(max(fraction, 0.015), 1)),
+                                         y: 1,
+                                         anchor: .leading)
+                            .animation(Motion.progress, value: fraction)
+                    } else if reduce {
+                        // Reduced motion means gentler, not nothing. A dimmed
+                        // full-width fill says "working, amount unknown" without
+                        // anything travelling across the screen.
+                        Capsule().fill(Palette.accent.opacity(0.4))
+                    } else {
+                        // Before the encoder reports a first fraction, the old
+                        // code drew a 1.5%-wide stub and held it there. A bar
+                        // that is present and motionless is the visual signature
+                        // of a hung job — it was reporting the opposite of the
+                        // truth. An unmeasured job gets constant motion instead,
+                        // and constant motion takes a linear curve: easing a
+                        // sweep would imply a rate that isn't being measured.
+                        let width = geo.size.width * 0.32
+                        Capsule()
+                            .fill(Palette.accent)
+                            .frame(width: width)
+                            .offset(x: sweeping ? geo.size.width : -width)
+                            .onAppear {
+                                withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
+                                    sweeping = true
+                                }
+                            }
+                    }
                 }
             }
             .clipShape(Capsule())
-            .animation(Motion.progress, value: fraction)
             .accessibilityValue(fraction.map { "\(Int($0 * 100)) percent" } ?? "In progress")
     }
 }
@@ -485,12 +581,25 @@ struct RecordPulse: View {
                     .scaleEffect(rippling ? 2.6 : 1)
                     .opacity(rippling ? 0 : 0.55)
             )
-            .onAppear {
-                guard !reduce else { return }
-                withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
-                    rippling = true
-                }
+            .onAppear { arm() }
+            // A `repeatForever` started in `onAppear` reads the motion setting
+            // exactly once and then never listens again — so switching on Reduce
+            // Motion mid-recording left the one looping animation in the app
+            // running anyway, which is precisely the case the setting exists to
+            // stop. Re-arming on the change makes the loop answer to it.
+            .onChange(of: reduce) { _, _ in arm() }
+    }
+
+    private func arm() {
+        withAnimation(.linear(duration: 0)) { rippling = false }
+        guard !reduce else { return }
+        // The restart has to land in a later turn of the run loop; collapsing
+        // false→true into one update gives SwiftUI no transition to animate.
+        Task { @MainActor in
+            withAnimation(.easeOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                rippling = true
             }
+        }
     }
 }
 

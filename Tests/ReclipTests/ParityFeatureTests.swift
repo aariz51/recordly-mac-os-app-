@@ -199,6 +199,11 @@ final class ParityFeatureTests: XCTestCase {
         track.samples = [CursorSample(t: 0, x: 0.5, y: 0.5), CursorSample(t: 1, x: 0.5, y: 0.5)]
         track.clicks = [0.5]
         var cs = CursorStyle(); cs.enabled = true; cs.showClicks = true; cs.size = 2.0
+        // The ripple is delayed by half the bounce duration, so this test pins both timings
+        // rather than inheriting the defaults — otherwise retuning the default bounce moves
+        // the window the sample time was chosen for.
+        cs.clickBounceDuration = 200
+        cs.clickEffectDurationMs = 500
         let atClick = CursorRenderer.drawClicks(on: base, track: track, time: 0.62, style: cs)   // ~120ms after
         let noClick = CursorRenderer.drawClicks(on: base, track: track, time: 5.0, style: cs)    // long after → nothing
 

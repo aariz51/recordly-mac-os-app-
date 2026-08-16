@@ -92,3 +92,35 @@ enum Shortcuts {
         return parts.joined(separator: " + ")
     }
 }
+
+/// Persists the user's shortcut bindings. `Shortcuts` itself stays pure (it is the model and
+/// is unit-tested); storage is this thin adapter over `UserDefaults`.
+enum ShortcutStore {
+    private static let key = "reclip.shortcuts"
+
+    static func load() -> [ShortcutAction: ShortcutBinding] {
+        guard let raw = UserDefaults.standard.dictionary(forKey: key) as? [String: [String: Any]] else {
+            return Shortcuts.defaults
+        }
+        var out: [ShortcutAction: ShortcutBinding] = [:]
+        for (name, dict) in raw {
+            guard let action = ShortcutAction(rawValue: name),
+                  let k = dict["key"] as? String else { continue }
+            out[action] = ShortcutBinding(key: k,
+                                          ctrl: dict["ctrl"] as? Bool ?? false,
+                                          shift: dict["shift"] as? Bool ?? false,
+                                          alt: dict["alt"] as? Bool ?? false)
+        }
+        return Shortcuts.mergeWithDefaults(out)
+    }
+
+    static func save(_ config: [ShortcutAction: ShortcutBinding]) {
+        var raw: [String: [String: Any]] = [:]
+        for (action, b) in config {
+            raw[action.rawValue] = ["key": b.key, "ctrl": b.ctrl, "shift": b.shift, "alt": b.alt]
+        }
+        UserDefaults.standard.set(raw, forKey: key)
+    }
+
+    static func reset() { UserDefaults.standard.removeObject(forKey: key) }
+}

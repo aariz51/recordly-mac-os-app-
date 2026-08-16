@@ -122,6 +122,10 @@ final class ScreenRecorder: NSObject, ObservableObject {
         config.capturesAudio = captureSystemAudio
         if captureMicrophone {
             config.captureMicrophone = true
+            // nil means "system default", which is what leaving the property alone does.
+            if let microphoneDeviceID {
+                config.microphoneCaptureDeviceID = microphoneDeviceID
+            }
         }
 
         try setupWriter(url: url, width: pixelWidth, height: pixelHeight)
@@ -141,7 +145,7 @@ final class ScreenRecorder: NSObject, ObservableObject {
         isRecording = true
         clock.start(at: Self.nowMs())
         cursorSampler.start()
-        if captureWebcam { webcamRecorder.start(besides: url) }
+        if captureWebcam { webcamRecorder.start(besides: url, deviceID: webcamDeviceID) }
         startElapsedTimer()
     }
 

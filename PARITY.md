@@ -2,13 +2,21 @@
 
 Authoritative line-by-line review of the Recordly codebase (`~/recordly`, Electron/TS)
 against Reclip (our native Swift app). Based on a full source inventory, not the README.
-✅ have · 🟡 partial · ❌ missing. Engine work tracked here; UI wiring owned by the UI dev.
+✅ have · 🟡 partial · ❌ missing · ⛔ out of scope.
 
-> **Scope reality:** the deep audit shows Recordly is a large, mature product — it has
-> whole subsystems Reclip doesn't (auto-captions/Whisper, a plugin+marketplace system, a
-> full timeline editor, a cursor-polish engine, project files, i18n). Reclip currently
-> implements roughly the **core record→polish→export loop (~20%)**. Full parity is a
-> multi-developer, multi-week effort; this file is the roadmap and running status.
+> **Status:** the engine sweep and the **UI wiring are both done**. Previous revisions of
+> this file tracked a large engine that the app didn't expose: `CursorStyle`, `ZoomDepth`,
+> `ZoomEasing`, `DeviceFrame`, `CaptionSettings`, `WhisperTranscriber`, `CaptionExport`,
+> `ExportQuality`, `MP4FrameRate`, `EncodingMode`, `GifSize`, `AudioRouting`, `MicProfile`,
+> `SpeedSegment`, `AudioVolumeRegion`, `MotionBlur`, `MotionSmoothing`, `CursorSway`,
+> `TimelineModel`, `EditorHistory`, `Shortcuts`, `ReclipProject`, `DocumentState`,
+> `BackgroundPresets`, `AudioLevelMeter`, `Countdown` and `CapturePermission` were all
+> implemented and tested, and referenced by **zero** UI files. They are now all reachable
+> from the app: a nine-section inspector (Scene · Clip · Zoom · Cursor · Webcam · Captions ·
+> Annotate · Audio · Export), a multi-lane timeline, and a recorder with countdown,
+> pause/resume/discard, device pickers and a level meter.
+>
+> What remains is genuinely out of scope or genuinely large — see §10.
 
 ---
 
@@ -25,16 +33,16 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | **Pause / Resume recording** | ✅ | `RecordingClock` + frame-drop pause, wired into ScreenRecorder; **verified in a real recording** (integration test drives start→pause→resume→stop → valid video) |
 | **Cancel (discard) recording** | ✅ | `ScreenRecorder.discard()` stops + deletes take & sidecars; tested |
 | Live REC timer | ✅ | elapsed, now backed by RecordingClock |
-| **Countdown timer (3/5/10s)** | ✅ | `Countdown` model (remaining/finished) unit-tested; UI hookup pending |
+| **Countdown timer (3/5/10s)** | ✅ | `Countdown` model + full-screen overlay with cancel; picker persists (None/3/5/10s) |
 | Microphone capture | ✅ | captureMicrophone |
 | **Mic device selection** | ✅ | `DeviceEnumerator.microphones()` + `microphoneDeviceID`; manually verified finding real devices on-device |
-| **Mic level meter** | 🟡 | RMS/peak math ported + tested (`AudioLevelMeter`); live tap needs mic permission |
+| **Mic level meter** | ✅ | `MicLevelMonitor` taps AVAudioEngine while idle and hands the device back on record; segmented `LevelMeter` in the recorder |
 | **Mic processing profiles** | ✅ | `MicProcessor` high-pass + noise gate + raw/voice/music, wired into export via passthrough post-mux; end-to-end verified (rumble removed in exported file) |
 | System audio | ✅ | captureSystemAudio |
 | **Separate mic/system routing (per-track + master gain)** | ✅ | `AudioRouting` model + export wiring (per-track gain via AVAudioMix); verified muting mic track on a 2-track source |
 | Webcam capture | ✅ | sidecar |
 | **Webcam device selection** | ✅ | `DeviceEnumerator.cameras()` + `webcamDeviceID`; manually verified (built-in + Continuity cameras found) |
-| Webcam live preview | ❌ | needs capture-session preview layer |
+| Webcam live preview | ❌ | needs a capture-session preview layer (Recordly's floating preview) |
 | **Floating HUD control bar** | ❌ | — |
 | Cursor position telemetry | ✅ | CursorSampler |
 | **Cursor click/interaction capture** | ✅ | click timestamps captured; expanding ripple rendered (CursorClickEffect timing); pixel-verified |
@@ -49,14 +57,14 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Trim | ✅ | StyledExport trim |
 | **Split clip / remove segment** | ✅ | `keepRanges` concatenates kept source ranges (CutMap-synced overlays); duration-verified |
 | **Clip model (per-clip speed grid, mute, volume, normalize)** | ✅ | speed regions + split/cut + mute + per-region volume + normalize all landed |
-| **Undo / redo** | ✅ | `EditorHistory` — bounded 100-entry stack, redo-clear on new edit, initialized/applied/unchanged/recorded results; unit-tested (UI keybinding pending) |
-| **Drag/resize regions on a timeline** | ❌ | UI (UI dev) |
+| **Undo / redo** | ✅ | `EditorHistory` over `ReclipProject` snapshots; ⌘Z / ⇧⌘Z plus on-stage buttons |
+| **Drag/resize regions on a timeline** | ✅ | `TimelineView` — Clip/Zoom/Speed/Notes lanes; drag to move, grab an edge to resize, click to select into the inspector |
 | Auto zoom (cursor) | ✅ | ZoomTimeline.autoZoom |
 | **Manual zoom regions (add/edit)** | ✅ | ZoomTimeline.addRegion + depth presets |
 | Zoom depth presets (6) + manual focus + easing (4 curves) | ✅ | ZoomDepth + ZoomEasing |
 | Zoom connect-neighbors + temporal motion-blur | ✅ | `connectNeighbors` merges regions; `MotionBlur` sample-plan frame-blending in the re-encode path (Recordly's shutter/sample tuning); both tested |
 | **Speed regions (per-segment)** | ✅ | `SpeedMap` piecewise mapping wired into compositor (scaleTimeRange + synced overlays); duration-verified |
-| **Playback controls (play/pause/skip/volume)** | 🟡 | preview loops; no scrub UI |
+| **Playback controls (play/pause/skip/volume)** | ✅ | transport pill (play/pause + ±5s), timeline scrubbing, looping preview |
 
 ## 3. Annotations
 | Feature | Reclip | Note |
@@ -68,15 +76,23 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Blur / censor region | ✅ | Annotation.kind=.blur/.box |
 | **Audio mute + volume + normalize + per-region volume** | ✅ | mute, 0–2x volume, peak-normalize, per-region ducking (AVAudioMix ramps, windowed-RMS verified) |
 
-## 4. Cursor polish engine  🟡 (v1 landed)
-Reclip now renders a stylized cursor (arrow/dot) from the tracked path with smooth
-interpolation, size control, and correct source-space compositing so crop/zoom carry it
-(CursorRenderer + CursorStyle; capture with showCursor=false). The **motion math is now
-ported and unit-tested**: `MotionSmoothing` (analytical damped-spring cursor+zoom
-smoothing, exact Recordly tuning), `CursorSway` (speed-scaled rotation), and
-`CursorClickEffect` (click-bounce sine dip + delayed ripple timing). Still needs **your
-eyes to tune the look** (spring feel, sway amount, ripple color/opacity) and wiring into
-the render/capture path; **cursor spotlight** (dim-around-pointer) now landed + pixel-verified; more cursor styles, loop mode, and motion presets remain.
+## 4. Cursor polish engine  ✅
+The ported motion math is now **wired into the render path**. `SmoothedCursorTrack` solves
+the whole clip once at composition-build time — the spring is stateful, and a video
+composition handler is called at arbitrary (and, on the re-encode path, repeated) times, so
+it cannot carry state itself. Each frame then indexes a precomputed sample.
+
+| Feature | Reclip | Note |
+|---|---|---|
+| Stylized sprite (arrow/dot/system) | ✅ | source-space, so crop/zoom carry it |
+| Size | ✅ | 0.4–4× |
+| **Spring smoothing** | ✅ | `MotionSmoothing.cursorSpringConfig`, 0–2; pixel-verified to move where the sprite lands |
+| **Sway** | ✅ | `CursorSway` rotation about the sprite's hotspot, itself eased so it can't strobe |
+| **Click bounce** | ✅ | sine dip about the hotspot, floored at 0.72 |
+| **Click effects (off/ripple/spotlight/echo)** | ✅ | + colour, size, opacity, duration |
+| Spotlight (dim around pointer) | ✅ | radius + dim amount |
+| Loop cursor | ❌ | Recordly replays the path past the end of the track |
+| Extra cursor styles (Tahoe, Figma, …) | ❌ | third-party sprite assets, not portable
 
 ## 5. Webcam overlay
 | Feature | Reclip | Note |
@@ -90,7 +106,7 @@ the render/capture path; **cursor spotlight** (dim-around-pointer) now landed + 
 | **Independent width + height** | ✅ | WebcamSettings.aspectRatio |
 | **9-cell position + custom X/Y** | ✅ | full 9-cell grid (custom X/Y still open) |
 | **Crop control** | ✅ | `cropZoom` (1–3x) + `cropOffsetX/Y` pan; tested |
-| **Upload / replace / remove footage** | ❌ | live only |
+| **Upload / replace / remove footage** | ✅ | `WebcamSettings.sourcePath` + attach/replace/detach in the Webcam section; persisted in `.reclip` |
 | **Time-offset alignment** | ✅ | `timeOffset` shifts webcam vs screen; tested |
 
 ## 6. Backgrounds / frame
@@ -98,7 +114,7 @@ the render/capture path; **cursor spotlight** (dim-around-pointer) now landed + 
 |---|---|---|
 | Solid (15 swatches) | ✅ | `BackgroundPresets` — 16-preset gallery (gradients + solids), all original colours |
 | Gradient (24 presets) | ✅ | `BackgroundPresets` gradient set (original, App-Store-clean) |
-| Padding | ✅ | linked only (no per-side) |
+| Padding | ✅ | linked, plus an independent per-side mode (top/bottom/left/right) |
 | Rounded corners | ✅ | circular + **squircle** (superellipse) toggle; pixel-verified |
 | Drop shadow | ✅ | 3-layer (VIDEO_SHADOW_LAYER_PROFILES) |
 | **Background blur (blurred source)** | ✅ | batch 2 |
@@ -107,15 +123,20 @@ the render/capture path; **cursor spotlight** (dim-around-pointer) now landed + 
 | **Aspect ratio presets (8 + custom)** | ✅ | 8 ratio presets + Source (custom X/Y still open) |
 | **Advanced per-side / vertical padding** | ✅ | `PaddingInsets` (top/bottom/left/right), content-rect compositing |
 
-## 7. Auto-captions  🟡 (rendering half landed)
-Reclip now renders styled burned-in caption pills, exports **SRT + VTT** sidecars,
-**wires Whisper transcription** (16kHz WAV extraction + whisper-cli orchestration + SRT
-parsing — model-run needs a ggml model + real audio, verified on-device), ships **10-language
-selection + model management** (`WhisperLanguage`/`WhisperModel`, download/cache), and now
-**word-level cue timing** (`CaptionEditing` — text normalization + even word distribution,
-the karaoke-highlight foundation). Still missing: the caption *editing UI*, karaoke
-*rendering* (needs your eyes on the animation), and (for App Store) linking whisper.cpp as a
-library instead of a subprocess.
+## 7. Auto-captions  ✅ (bar karaoke rendering)
+Styled burned-in caption pills, **SRT + VTT** sidecars (opt-in at export), Whisper
+transcription (16kHz WAV extraction + whisper-cli orchestration + SRT parsing), 10-language
+selection and model download/cache. The Captions section now exposes all of it: language,
+model (with download), generate/regenerate/clear, an editable cue list, and full styling —
+font family/size, colour, bottom offset, max width, box opacity/radius.
+
+**Entrance animations landed** (`CaptionAnimation`: off/fade/rise/pop + duration), each a
+smoothstep envelope over opacity/offset/scale, pixel-verified mid-transition and at rest.
+
+Still missing: karaoke word highlighting (`CaptionEditing.buildWords` is the tested
+foundation, but the *rendering* is unbuilt), and — for App Store — linking whisper.cpp as a
+library rather than shelling out to `whisper-cli`. The UI says so plainly when the binary
+isn't present rather than failing with a path error.
 
 ## 7b. Extensions
 | Feature | Reclip | Note |
@@ -138,57 +159,50 @@ library instead of a subprocess.
 | GIF frame-rate (4) + size presets (3) | ✅ | GifSize presets + fps param |
 | Output dimension control | ✅ | aspect presets + `maxOutputHeight` resolution cap (1080/720/…); tested |
 | Reveal in Finder | ✅ | — |
-| Save dialog / Save-again / discard | 🟡 | fixed output path |
+| Save dialog / Save-again / discard | 🟡 | writes beside the source and reveals in Finder; no Save-As panel |
 | Export progress phases | ✅ | `ExportProgress` phase model (preparing/extracting/rendering/finalizing/saving) + `saving(previous:)`; unit-tested |
 
-## 9. Platform / workflow  (partial)
-Project files: **`.reclip` save/reopen of full editor state ✅ (ReclipProject)** + **dirty-state
-tracking ✅ (`DocumentState`)**. **Timeline core model ✅ (`TimelineModel`** — span overlap/clamp,
-playhead+axis time formatting, track-row IDs; the pure data layer the timeline UI consumes).
-**Extension system foundation ✅ (`ExtensionManifest` + `ExtensionRegistry`** — schema
-validation + permission gating). Note: the extension **marketplace / dynamic-JS loading is
-deliberately out of scope** — a native App Store app can't download+execute remote code
-(§2.5.2), so extensions here would be built-in/curated, not a JS plugin market.
-Still absent: project browser, autosave/recovery, ~50 persisted prefs + named presets,
-rebindable keyboard shortcuts, auto-update, theme, **9-locale i18n**, custom fonts.
+## 9. Platform / workflow
+| Feature | Reclip | Note |
+|---|---|---|
+| **`.reclip` project save / reopen** | ✅ | `ReclipProject` — every setting; auto-loads when reopening a clip; ⌘S |
+| **Dirty-state tracking** | ✅ | `DocumentState`; unsaved dot in the inspector header |
+| **Open from Finder / drag-onto-icon** | ✅ | `CFBundleDocumentTypes` + `application(_:open:)`; a `.reclip` opens the clip it names |
+| **Rebindable keyboard shortcuts** | ✅ | `ShortcutsConfig` sheet over the `Shortcuts` model (conflict detection against fixed + configurable), persisted via `ShortcutStore` |
+| **Shortcut reference sheet** | ✅ | ⌘/ — rendered from the live bindings, not a hand-written list |
+| Timeline core model | ✅ | `TimelineModel` — span overlap/clamp, playhead + axis formatting, track-row IDs |
+| Extension manifest + permission model | ✅ | `ExtensionManifest` + `ExtensionRegistry` |
+| Project browser / recents | ❌ | open-a-file only |
+| Autosave / crash recovery of edits | ❌ | saves are explicit |
+| Theme (light/dark/system) | 🟡 | follows the system automatically; no in-app override |
+| 9-locale i18n | ❌ | subsystem-scale; no string infrastructure yet |
+| Auto-update | ⛔ | App Store handles updates |
 
 ---
 
-## Engine work completed so far (original Swift)
-- Batch 1: cursor show/hide, webcam mirror/roundness/shadow/margin, GIF loop, MP4 quality.
-- Batch 2: background blur (blurred-source), aspect-ratio presets + output canvas.
-- Batch 3 (deep parity sweep — pure logic ported line-by-line from Recordly, 91 tests):
-  - **Engine/export:** temporal motion blur (`MotionBlur`), MP4 frame-rate 24/30/60 via
-    AVAssetWriter re-encode + resampling, resolution-aware bitrate (`ExportBitrate`),
-    aspect-canvas sizing fix (`ExportDimensions`, was upscaling), 3-layer shadow.
-  - **Capture logic:** `RecordingClock` (pause/resume, wired live) + `Countdown`.
-  - **Editor logic:** `EditorHistory` (undo/redo), `ExportProgress` phases, `DocumentState`
-    (dirty tracking).
-  - **Captions:** Whisper pipeline + `WhisperLanguage`/`WhisperModel` + `CaptionEditing`
-    (word-level timing).
-  - **Timing:** `MediaTiming` (clamp/duration).
-  - **Animation math:** `MotionSmoothing` (damped-spring cursor+zoom smoothing), `CursorSway`,
-    `CursorClickEffect` (bounce+ripple), `ZoomTransform` (invertible camera geometry).
+## 10. What is genuinely still missing
+Everything else in this document is done. These are the honest remainders, with why:
 
-### Remaining is no longer un-ported pure logic — it is one of:
-- **Redundant** with existing tested code (Recordly's zoomRegionUtils ≈ `ZoomTimeline`,
-  gifExporter ≈ `GifExport`, webcamOverlay ≈ `WebcamOverlay`) — re-porting would risk regressions.
-- **Not applicable** (WebCodecs/muxer/decoder browser plumbing subsumed by AVFoundation).
-- **UI-dev's active lane** (timeline model, drag-drop, preview player, editor preferences).
-- **Capture-hardware-gated** (device pickers, meters, HUD, click telemetry — need a live recording).
-- **Visual tuning + wiring** (the ported animation math needs your eyes on feel, then hookup).
-- **Subsystem-scale** (extensions/marketplace, 9-locale i18n).
+1. **Karaoke word highlighting** — timing math is ported and tested; the renderer isn't built.
+2. **Timeline zoom / pan** — lanes are fixed to the clip length, so long recordings get cramped.
+3. **Waveform in the timeline** — Recordly draws audio peaks under the clip.
+4. **Floating webcam preview while recording** — needs a capture-session preview layer.
+5. **Source thumbnails in the picker** — the source list is text-only.
+6. **Project browser / recents / autosave.**
+7. **i18n (9 locales)** — subsystem-scale, and no localization infrastructure exists yet.
+8. **Loop cursor + extra cursor styles** — the extra styles are third-party sprite assets.
+9. **Save-As panel** — exports write beside the source and reveal in Finder.
+10. **Extensions marketplace / remote-JS loading** — ⛔ deliberately out of scope: a native
+    App Store app cannot download and execute remote code (§2.5.2). The manifest, permission
+    model and render-hook runtime are implemented for built-in/curated extensions.
 
-## Prioritized engine roadmap (feasible, high-value first)
-1. Manual zoom regions add/edit API (model exists) + zoom depth presets & easing
-2. More backgrounds (wallpaper images, more solids/gradients) + per-side padding + squircle
-3. Crop (compositor crop rect + reset)
-4. `.reclip` project file — Codable of every setting; save/open/recents
-5. Webcam: independent W/H, 9-cell + custom XY, react-to-zoom
-6. Export: frame-rate (24/30/60), GIF fps/size presets in UI, output-dimension picker, save dialog, progress phases
-7. Recording: countdown, pause/resume/cancel, mic/webcam device pickers + meters
-8. Rich annotations (typography, image, arrow, blur/censor)
-9. **Cursor polish engine** (hide OS cursor + rendered smoothed sprite, size, motion blur, click bounce, click effects) — largest
-10. **Auto-captions** (Whisper) and **extensions/marketplace** — each a subsystem; likely out of near-term scope
+## Notes on fidelity
+Where Recordly's behaviour is a *web* behaviour, Reclip does the native equivalent rather
+than a literal port:
+- **Custom fonts:** Recordly fetches Google Fonts by URL; Reclip picks from installed
+  families (`NSFontManager`), which is what a Mac app should do and works offline.
+- **Wallpapers:** Recordly ships an image gallery; Reclip ships 16 original gradients/solids
+  plus user-supplied images — third-party image assets aren't redistributable here.
+- **Encoding:** WebCodecs/muxer/decoder plumbing is subsumed by AVFoundation.
 
-_Refreshed from the full Recordly source inventory._
+_Refreshed after the UI-wiring pass; 213 tests green._

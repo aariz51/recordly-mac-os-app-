@@ -309,6 +309,12 @@ enum StyledExport {
             return CGRect(x: l, y: b, width: max(canvas.width - l - r, 1), height: max(canvas.height - t - b, 1))
         }()
         let ciContext = CIContext()
+        // The cursor spring is stateful, so it is solved once over the whole source range
+        // rather than per composited frame (which arrives at arbitrary, repeated times).
+        let cursorMotion: SmoothedCursorTrack? = (cursor != nil && cursorStyle.enabled)
+            ? SmoothedCursorTrack.build(track: cursor!, style: cursorStyle,
+                                        duration: fullDuration.seconds)
+            : nil
         let staticBackground = style.backgroundImage.map { makeImageBackground($0, size: canvas) }
             ?? makeBackground(style.background, size: canvas)
         let renderedAnnotations = Annotations.prerender(annotations, canvas: canvas)
@@ -330,10 +336,11 @@ enum StyledExport {
             // Spotlight (dim around the cursor) then the stylized cursor, both in source
             // space so crop/zoom carry them.
             let lit = CursorRenderer.applySpotlight(on: request.sourceImage, track: cursor,
-                                                    time: srcT, style: cursorStyle)
-            let clicked = CursorRenderer.drawClicks(on: lit, track: cursor, time: srcT, style: cursorStyle)
+                                                    time: srcT, style: cursorStyle, motion: cursorMotion)
+            let clicked = CursorRenderer.drawClicks(on: lit, track: cursor, time: srcT,
+                                                    style: cursorStyle, motion: cursorMotion)
             let withCursor = CursorRenderer.draw(on: clicked, track: cursor,
-                                                 time: srcT, style: cursorStyle)
+                                                 time: srcT, style: cursorStyle, motion: cursorMotion)
             let frame = applyCrop(withCursor, crop)
             // Background is either the static solid/gradient, or a blurred fill of the frame.
             let background = blur > 0.01

@@ -16,7 +16,18 @@ enum ZoomEasing: String, CaseIterable, Identifiable {
     case smooth   // smoothstep
     case glide    // smootherstep (gentler)
     case snappy   // ease-out cubic (fast in, settle)
+    case recordly // Recordly's signature curve: a soft lead-in with a long settle
     var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .linear: return "Linear"
+        case .smooth: return "Smooth"
+        case .glide: return "Glide"
+        case .snappy: return "Snappy"
+        case .recordly: return "Signature"
+        }
+    }
 
     func apply(_ x: Double) -> CGFloat {
         let c = min(max(x, 0), 1)
@@ -25,6 +36,29 @@ enum ZoomEasing: String, CaseIterable, Identifiable {
         case .smooth: return CGFloat(c * c * (3 - 2 * c))
         case .glide:  return CGFloat(c * c * c * (c * (c * 6 - 15) + 10))
         case .snappy: return CGFloat(1 - pow(1 - c, 3))
+        case .recordly:
+            // A cubic-bezier(0.22, 1, 0.36, 1)-shaped ease-out: leaves fast, settles long.
+            return CGFloat(1 - pow(1 - c, 4))
+        }
+    }
+}
+
+/// The two motion presets Recordly ships, which set every zoom timing at once.
+enum ZoomMotionPreset: String, CaseIterable, Identifiable {
+    case focused, smooth
+    var id: String { rawValue }
+    var label: String { self == .focused ? "Focused" : "Smooth" }
+    var summary: String {
+        switch self {
+        case .focused: return "Snappier motion for demos and walkthroughs."
+        case .smooth:  return "Gentler motion for presentations and polished reveals."
+        }
+    }
+    /// (inDuration, outDuration, inEasing, outEasing)
+    var timing: (Double, Double, ZoomEasing, ZoomEasing) {
+        switch self {
+        case .focused: return (0.85, 0.6, .snappy, .snappy)
+        case .smooth:  return (1.52, 1.02, .recordly, .recordly)
         }
     }
 }
@@ -53,8 +87,33 @@ enum ZoomDepth: String, CaseIterable, Identifiable {
 /// Evaluates the active zoom (scale + focus) at any time, with eased in/out ramps.
 struct ZoomTimeline: Equatable {
     var regions: [ZoomRegion] = []
-    var ramp: Double = 0.5   // seconds to ease in and out
+    var ramp: Double = 0.5   // seconds to ease in and out (legacy; used when in/out are nil)
     var easing: ZoomEasing = .smooth
+
+    // Recordly splits the single ramp into a separate entrance and exit, each with its own
+    // duration and curve. Both default to `ramp`/`easing` so existing projects are unchanged.
+    var inDuration: Double? = nil
+    var outDuration: Double? = nil
+    var inEasing: ZoomEasing? = nil
+    var outEasing: ZoomEasing? = nil
+
+    /// When on, two regions closer than `connectedGap` glide from one focus to the next at
+    /// full zoom instead of pulling out and pushing back in.
+    var connectZooms: Bool = false
+    var connectedGap: Double = 1.5
+    var connectedDuration: Double = 1.0
+    var connectedEasing: ZoomEasing = .glide
+
+    var effectiveInDuration: Double { max(0.001, inDuration ?? ramp) }
+    var effectiveOutDuration: Double { max(0.001, outDuration ?? ramp) }
+    var effectiveInEasing: ZoomEasing { inEasing ?? easing }
+    var effectiveOutEasing: ZoomEasing { outEasing ?? easing }
+
+    /// Applies a motion preset to the in/out timings.
+    mutating func apply(preset: ZoomMotionPreset) {
+        let (i, o, ie, oe) = preset.timing
+        inDuration = i; outDuration = o; inEasing = ie; outEasing = oe
+    }
 
     /// Add a manual zoom region at a chosen depth and focus point.
     @discardableResult
@@ -88,14 +147,44 @@ struct ZoomTimeline: Equatable {
 
     /// Returns scale (1 = no zoom) and focus point at time `t`.
     func value(at t: Double) -> (scale: CGFloat, focus: CGPoint) {
-        guard let r = regions.first(where: { t >= $0.start && t <= $0.end }) else {
-            return (1.0, CGPoint(x: 0.5, y: 0.5))
+        let sorted = regions.sorted { $0.start < $1.start }
+
+        // Inside a region: ramp in from its start, out toward its end. When the region is
+        // connected to a neighbour on either side, that edge's ramp is suppressed — the
+        // camera is already at depth coming in, and stays at depth going out.
+        if let idx = sorted.firstIndex(where: { t >= $0.start && t <= $0.end }) {
+            let r = sorted[idx]
+            let prev = idx > 0 ? sorted[idx - 1] : nil
+            let next = idx + 1 < sorted.count ? sorted[idx + 1] : nil
+            let joinedBefore = connectZooms && prev.map { r.start - $0.end <= connectedGap } == true
+            let joinedAfter = connectZooms && next.map { $0.start - r.end <= connectedGap } == true
+
+            let inEnv = joinedBefore ? 1
+                : effectiveInEasing.apply(min(1.0, (t - r.start) / effectiveInDuration))
+            let outEnv = joinedAfter ? 1
+                : effectiveOutEasing.apply(min(1.0, (r.end - t) / effectiveOutDuration))
+            let env = min(inEnv, outEnv)
+            return (1.0 + (r.scale - 1.0) * env, r.focus)
         }
-        let inRamp = min(1.0, (t - r.start) / max(ramp, 0.001))
-        let outRamp = min(1.0, (r.end - t) / max(ramp, 0.001))
-        let env = easing.apply(min(inRamp, outRamp))
-        let scale = 1.0 + (r.scale - 1.0) * env
-        return (scale, r.focus)
+
+        // Between two connected regions: hold the zoom and pan the focus across the gap.
+        if connectZooms {
+            for (a, b) in zip(sorted, sorted.dropFirst())
+            where t > a.end && t < b.start && b.start - a.end <= connectedGap {
+                let gap = b.start - a.end
+                let span = max(0.001, min(connectedDuration, gap))
+                // Centre the glide in the gap so the pan reads as deliberate rather than
+                // rushing at one edge.
+                let lead = (gap - span) / 2
+                let p = min(1, max(0, (t - a.end - lead) / span))
+                let e = Double(connectedEasing.apply(p))
+                let scale = a.scale + (b.scale - a.scale) * CGFloat(e)
+                let focus = CGPoint(x: a.focus.x + (b.focus.x - a.focus.x) * e,
+                                    y: a.focus.y + (b.focus.y - a.focus.y) * e)
+                return (scale, focus)
+            }
+        }
+        return (1.0, CGPoint(x: 0.5, y: 0.5))
     }
 
     /// Build zoom regions automatically from cursor dwell clusters.

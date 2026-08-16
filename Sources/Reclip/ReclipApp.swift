@@ -15,6 +15,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    /// Opening a file from Finder — double-click, drag onto the icon, or `open -a Reclip` —
+    /// goes straight to the editor. A `.reclip` names its recording, so opening a project
+    /// opens the clip it describes rather than a file the editor can't play.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            if url.pathExtension.lowercased() == "reclip" {
+                guard let project = try? ReclipProject.load(from: url) else { continue }
+                let movie = url.deletingLastPathComponent()
+                    .appendingPathComponent(project.sourceFileName)
+                if FileManager.default.fileExists(atPath: movie.path) {
+                    EditorWindow.show(for: movie)
+                }
+            } else {
+                EditorWindow.show(for: url)
+            }
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
 }
 
 @main

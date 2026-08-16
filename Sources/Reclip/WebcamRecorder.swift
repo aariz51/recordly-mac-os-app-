@@ -7,6 +7,9 @@ final class WebcamRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
 
     private let session = AVCaptureSession()
     private let output = AVCaptureMovieFileOutput()
+    /// The device the session is currently wired to, so a changed selection reconfigures
+    /// instead of silently recording from the previous camera.
+    private var configuredDeviceID: String?
     private var configured = false
 
     static func sidecarURL(for movie: URL) -> URL {
@@ -19,12 +22,18 @@ final class WebcamRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
             || AVCaptureDevice.default(for: .video) != nil
     }
 
-    private func configureIfNeeded() -> Bool {
-        if configured { return true }
+    /// Configures the session for `deviceID` (nil = system default). Re-runs whenever the
+    /// selected camera changes.
+    private func configureIfNeeded(deviceID: String?) -> Bool {
+        if configured && configuredDeviceID == deviceID { return true }
         session.beginConfiguration()
+        // Swapping cameras means dropping the previous input first, or the session ends up
+        // with two video inputs and refuses to add the new one.
+        for input in session.inputs { session.removeInput(input) }
         session.sessionPreset = .high
 
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+        guard let device = DeviceEnumerator.camera(id: deviceID)
+                ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
                 ?? AVCaptureDevice.default(for: .video),
               let input = try? AVCaptureDeviceInput(device: device),
               session.canAddInput(input) else {
@@ -35,11 +44,12 @@ final class WebcamRecorder: NSObject, AVCaptureFileOutputRecordingDelegate {
         if session.canAddOutput(output) { session.addOutput(output) }
         session.commitConfiguration()
         configured = true
+        configuredDeviceID = deviceID
         return true
     }
 
-    func start(besides movie: URL) {
-        guard configureIfNeeded() else { return }
+    func start(besides movie: URL, deviceID: String? = nil) {
+        guard configureIfNeeded(deviceID: deviceID) else { return }
         let url = Self.sidecarURL(for: movie)
         try? FileManager.default.removeItem(at: url)
         if !session.isRunning { session.startRunning() }

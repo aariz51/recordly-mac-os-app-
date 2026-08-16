@@ -109,15 +109,23 @@ struct TrimBar: View {
                 RoundedRectangle(cornerRadius: Radius.track, style: .continuous)
                     .fill(Color.primary.opacity(0.09))
 
+                // The kept region is the one thing this control exists to state,
+                // so it has to survive being read at a glance. At 0.22 the accent
+                // sat close enough to the 0.09 empty track that in light mode the
+                // bar read as one flat band — the answer was there and illegible.
                 RoundedRectangle(cornerRadius: Radius.track, style: .continuous)
-                    .fill(Palette.accent.opacity(grabbed == nil ? 0.22 : 0.30))
+                    .fill(Palette.accent.opacity(grabbed == nil ? 0.28 : 0.38))
                     .frame(width: max(endX - startX + handleWidth, handleWidth * 2))
                     .offset(x: startX)
                     .animation(Motion.hover, value: grabbed)
 
                 if let playhead, playhead >= start, playhead <= end {
+                    // Hard-coded white vanished against the light-mode track: the
+                    // playhead was drawn, just invisible in half the app's runs.
+                    // `.primary` inverts with the scheme, so it stays the darkest
+                    // or lightest thing on the track either way.
                     Capsule()
-                        .fill(Color.white.opacity(0.85))
+                        .fill(Color.primary.opacity(0.9))
                         .frame(width: 2)
                         .padding(.vertical, 5)
                         .offset(x: CGFloat(playhead / span) * usable + handleWidth)
@@ -272,7 +280,11 @@ struct Chip: View {
                 .background(
                     RoundedRectangle(cornerRadius: Radius.chip, style: .continuous)
                         .fill(isSelected ? Palette.accent : Color.primary.opacity(hovering ? 0.10 : 0.06)))
-                .animation(Motion.enter(reduce), value: isSelected)
+                // Selecting a chip is a colour swap, not an entrance — nothing
+                // arrives, nothing leaves. The punchy ease-out belongs to things
+                // that travel; on a fill it just makes the colour land late.
+                // Same curve as hover, because it's the same kind of change.
+                .animation(Motion.hover, value: isSelected)
                 .animation(Motion.hover, value: hovering)
         }
         .buttonStyle(PressableStyle())
@@ -313,10 +325,15 @@ struct CornerPicker: View {
             corner = value
             onChange()
         } label: {
+            // The dot grows by transform, not by frame. Animating `width`/`height`
+            // pushes every change through layout and paint; a scale is composited
+            // and, unlike the frame swap, doesn't shove the neighbouring dots a
+            // couple of points sideways each time the selection moves.
             Circle()
                 .fill(selected ? Palette.accent : Color.primary.opacity(0.22))
-                .frame(width: selected ? 15 : 11, height: selected ? 15 : 11)
+                .frame(width: 11, height: 11)
                 .overlay(Circle().strokeBorder(Color.white.opacity(selected ? 0.6 : 0), lineWidth: 1.5))
+                .scaleEffect(selected ? 1.36 : 1)
                 .padding(7)
                 .contentShape(Rectangle())
                 .animation(Motion.enter(reduce), value: selected)

@@ -32,5 +32,56 @@
     <string>Reclip uses the microphone to record narration with your screen recordings.</string>
     <key>NSCameraUsageDescription</key>
     <string>Reclip uses the camera for optional webcam overlays in your recordings.</string>
+    <!-- Recordings open straight into the editor; a .reclip project opens the clip it
+         describes. Both are Viewer roles: Reclip edits alongside the source rather than
+         replacing it, so it never claims ownership of a user's movie files. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Movie</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.mpeg-4</string>
+                <string>com.apple.quicktime-movie</string>
+            </array>
+        </dict>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Reclip Project</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Owner</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.aariz51.reclip.project</string>
+            </array>
+        </dict>
+    </array>
+    <key>UTExportedTypeDeclarations</key>
+    <array>
+        <dict>
+            <key>UTTypeIdentifier</key>
+            <string>com.aariz51.reclip.project</string>
+            <key>UTTypeDescription</key>
+            <string>Reclip Project</string>
+            <key>UTTypeConformsTo</key>
+            <array>
+                <string>public.json</string>
+            </array>
+            <key>UTTypeTagSpecification</key>
+            <dict>
+                <key>public.filename-extension</key>
+                <array>
+                    <string>reclip</string>
+                </array>
+            </dict>
+        </dict>
+    </array>
 </dict>
 </plist>

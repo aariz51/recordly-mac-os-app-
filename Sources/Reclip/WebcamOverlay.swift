@@ -31,6 +31,8 @@ struct WebcamSettings: Equatable {
     var roundness: Double = 1.0       // 1 = fully round, 0 = square corners
     var mirror: Bool = true           // selfie-style horizontal flip
     var shadow: Bool = true           // soft drop shadow behind the bubble
+    /// User-attached footage; nil uses the sidecar recorded alongside the clip.
+    var sourcePath: String? = nil
 }
 
 /// Pre-decoded webcam frames (detached from their pixel buffers) keyed by time.
@@ -48,8 +50,11 @@ struct WebcamFrames {
 
 enum WebcamOverlay {
 
-    static func load(for movie: URL, targetWidth: CGFloat = 400) async -> WebcamFrames {
-        let url = WebcamRecorder.sidecarURL(for: movie)
+    /// Loads the webcam sidecar recorded alongside `movie`, or `override` when the user has
+    /// attached their own footage (Recordly lets a clip be paired with any camera file).
+    static func load(for movie: URL, override: URL? = nil,
+                     targetWidth: CGFloat = 400) async -> WebcamFrames {
+        let url = override ?? WebcamRecorder.sidecarURL(for: movie)
         guard FileManager.default.fileExists(atPath: url.path) else { return WebcamFrames() }
         let asset = AVURLAsset(url: url)
         guard let track = try? await asset.loadTracks(withMediaType: .video).first,

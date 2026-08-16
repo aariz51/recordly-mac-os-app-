@@ -9,35 +9,31 @@ struct EditorView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduce
 
-    @State private var style = StyleOptions()
-    @State private var zoom = ZoomTimeline()
-    @State private var autoZoom = false
-    @State private var cursorTrack: CursorTrack?
-    @State private var duration: Double = 0
-    @State private var trimStart: Double = 0
-    @State private var trimEnd: Double = 0
-    @State private var webcamFrames = WebcamFrames()
-    @State private var webcamLoaded = false
-    @State private var webcam = WebcamSettings()
-    @State private var annotations: [Annotation] = []
-    @State private var newCaption = ""
-    @State private var speed: Double = 1.0
+    @StateObject private var model: EditorModel
     @State private var player = AVPlayer()
     @State private var isExporting = false
     @State private var exportProgress: Double?
     @State private var status: Status?
     @State private var exportedURL: URL?
-    @State private var playhead: Double = 0
-    @State private var isPlaying = false
     @State private var timeObserver: Any?
     @State private var didLoad = false
     @State private var appeared = false
-    /// Space is the scrub key everywhere else in video; it must still type a
-    /// space when the caption field has focus.
-    @FocusState private var captionFocused: Bool
+    @State private var showShortcuts = false
+    @State private var showShortcutConfig = false
+    @State private var shortcutConfig: [ShortcutAction: ShortcutBinding] = ShortcutStore.load()
+    @State private var sourceSize: CGSize = .zero
+    @State private var audioTrackCount = 0
     /// Aspect of the rendered composition, so the preview card hugs the video
     /// instead of framing it in black letterbox bars.
     @State private var previewAspect: CGFloat = 16.0 / 9.0
+    /// Rebuilds are expensive; a slider drag fires dozens of commits, so they coalesce.
+    @State private var rebuildTask: Task<Void, Never>?
+
+    init(sourceURL: URL, onClose: @escaping () -> Void) {
+        self.sourceURL = sourceURL
+        self.onClose = onClose
+        _model = StateObject(wrappedValue: EditorModel(sourceURL: sourceURL))
+    }
 
     struct Status: Equatable {
         let kind: FeedbackKind
@@ -45,34 +41,19 @@ struct EditorView: View {
         init(_ kind: FeedbackKind, _ message: String) { self.kind = kind; self.message = message }
     }
 
-    private let presets: [(String, StyleOptions.Background)] = [
-        ("Indigo", .gradient(topRGB: (0.39, 0.36, 1.0), bottomRGB: (0.66, 0.33, 0.97))),
-        ("Sunset", .gradient(topRGB: (1.0, 0.42, 0.42), bottomRGB: (0.99, 0.79, 0.34))),
-        ("Ocean", .gradient(topRGB: (0.15, 0.55, 0.95), bottomRGB: (0.10, 0.20, 0.45))),
-        ("Charcoal", .solid(red: 0.11, green: 0.12, blue: 0.14)),
-        ("White", .solid(red: 0.96, green: 0.96, blue: 0.97))
-    ]
-    @State private var presetIndex = 0
-
     var body: some View {
         HStack(spacing: 0) {
-            stage
+            stageColumn
+            SectionRail(section: $model.section)
             inspector
                 .frame(width: 320)
         }
-        .frame(minWidth: 940, idealWidth: 1060, minHeight: 620, idealHeight: 680)
-        .background {
-            // Space plays and pauses, as it does in every other video tool.
-            // Disabled while the caption field is focused so typing still works.
-            Button("Play or pause preview") { togglePlayback() }
-                .keyboardShortcut(.space, modifiers: [])
-                .disabled(captionFocused)
-                .opacity(0)
-                .accessibilityHidden(true)
-        }
+        .frame(minWidth: 1140, idealWidth: 1300, minHeight: 720, idealHeight: 820)
+        .background { shortcutHost }
         .task { await firstLoad() }
         .onDisappear {
             if let timeObserver { player.removeTimeObserver(timeObserver) }
+            rebuildTask?.cancel()
             player.pause()
         }
         .onReceive(NotificationCenter.default.publisher(for: .AVPlayerItemDidPlayToEndTime)) { _ in
@@ -83,9 +64,112 @@ struct EditorView: View {
                 player.play()
             }
         }
+        .sheet(isPresented: $showShortcuts) {
+            ShortcutsHelp(config: shortcutConfig,
+                          onCustomize: {
+                              showShortcuts = false
+                              // The sheet has to finish dismissing before the next one opens.
+                              Task { @MainActor in
+                                  try? await Task.sleep(for: .milliseconds(220))
+                                  showShortcutConfig = true
+                              }
+                          },
+                          onClose: { showShortcuts = false })
+        }
+        .sheet(isPresented: $showShortcutConfig) {
+            ShortcutsConfig(config: $shortcutConfig,
+                            onSave: { updated in
+                                shortcutConfig = updated
+                                ShortcutStore.save(updated)
+                            },
+                            onClose: { showShortcutConfig = false })
+        }
+    }
+
+    // MARK: - Keyboard
+    //
+    // Single-key actions live on invisible buttons rather than a key-event monitor, so they
+    // inherit SwiftUI's focus rules — they stop firing while a text field has the keyboard,
+    // which is exactly the behaviour a monitor would have to reimplement badly.
+
+    private var shortcutHost: some View {
+        let bound = Shortcuts.mergeWithDefaults(shortcutConfig)
+        return Group {
+            action(bound[.playPause], "Play or pause") { togglePlayback() }
+            action(bound[.addZoom], "Add zoom") {
+                _ = model.addZoom(at: model.playhead); commit()
+            }
+            action(bound[.addKeyframe], "Add speed region") {
+                _ = model.addSpeedRegion(at: model.playhead); commit()
+            }
+            action(bound[.addAnnotation], "Add annotation") {
+                model.addAnnotation(kind: .text, at: model.playhead); commit()
+            }
+            action(bound[.splitClip], "Split clip") {
+                model.splitAtPlayhead(); commit()
+            }
+            action(bound[.deleteSelected], "Delete selected") { deleteSelection() }
+
+            // Fixed bindings — deliberately not rebindable, and matched by `Shortcuts.fixed`
+            // so the config sheet refuses to hand them out.
+            hiddenButton("Delete selected (alt)", .delete, []) { deleteSelection() }
+            hiddenButton("Cycle annotations", KeyEquivalent("\t"), []) {
+                model.cycleAnnotation(forward: true)
+            }
+            hiddenButton("Undo", KeyEquivalent("z"), .command) {
+                if model.undo() { scheduleRebuild() }
+            }
+            hiddenButton("Redo", KeyEquivalent("z"), [.command, .shift]) {
+                if model.redo() { scheduleRebuild() }
+            }
+            hiddenButton("Shortcuts", KeyEquivalent("/"), .command) { showShortcuts = true }
+        }
+    }
+
+    /// A hidden button carrying a user-configurable binding.
+    @ViewBuilder
+    private func action(_ binding: ShortcutBinding?, _ title: String,
+                        perform: @escaping () -> Void) -> some View {
+        if let binding, let ch = binding.key.first {
+            hiddenButton(title, KeyEquivalent(ch), Self.modifiers(for: binding), action: perform)
+        }
+    }
+
+    /// `ShortcutBinding.ctrl` means "the platform's primary modifier", which on macOS is ⌘.
+    private static func modifiers(for binding: ShortcutBinding) -> EventModifiers {
+        var m: EventModifiers = []
+        if binding.ctrl { m.insert(.command) }
+        if binding.shift { m.insert(.shift) }
+        if binding.alt { m.insert(.option) }
+        return m
+    }
+
+    private func hiddenButton(_ title: String, _ key: KeyEquivalent,
+                              _ modifiers: EventModifiers,
+                              action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .keyboardShortcut(key, modifiers: modifiers)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+    }
+
+    private func deleteSelection() {
+        if model.selectedAnnotationID != nil { model.deleteSelectedAnnotation() }
+        else if model.selectedZoomID != nil { model.deleteSelectedZoom() }
+        else { return }
+        commit()
     }
 
     // MARK: - Stage
+
+    private var stageColumn: some View {
+        VStack(spacing: 0) {
+            stage
+            timelineBar
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
 
     private var stage: some View {
         ZStack {
@@ -95,7 +179,7 @@ struct EditorView: View {
                 .aspectRatio(previewAspect, contentMode: .fit)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.stage, style: .continuous))
                 .shadow(color: .black.opacity(0.5), radius: 24, y: 10)
-                .padding(Space.xxl)
+                .padding(Space.xl)
 
             if !didLoad {
                 VStack(spacing: Space.m) {
@@ -108,32 +192,96 @@ struct EditorView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // Top-trailing, because the window's traffic lights sit over the
-        // top-leading corner of the stage.
-        .overlay(alignment: .topTrailing) {
-            // Was a decorative "Live preview" badge. It sat in the one spot the
-            // eye already goes and did nothing — so it became the transport:
-            // it now says whether the preview is running and clicking it stops it.
+        .overlay(alignment: .topTrailing) { transportPill }
+        .overlay(alignment: .bottomLeading) { historyControls }
+        .animation(Motion.enter(reduce), value: didLoad)
+    }
+
+    // Top-trailing, because the window's traffic lights sit over the
+    // top-leading corner of the stage.
+    private var transportPill: some View {
+        // Was a decorative "Live preview" badge. It sat in the one spot the
+        // eye already goes and did nothing — so it became the transport:
+        // it now says whether the preview is running and clicking it stops it.
+        //
+        // Nothing here animates on `isPlaying`, deliberately. This label had
+        // a symbol-replace and a crossfade on it, which is the single worst
+        // place in the app to spend motion: Space toggles playback, the
+        // preview loops, and trimming a clip means hitting it over and over
+        // for as long as the session lasts. Motion on an action repeated
+        // that often stops reading as polish and starts reading as lag
+        // between the key and the machine. The press scale stays — that
+        // fires on a click, and press feedback is never the thing to cut.
+        HStack(spacing: Space.xs) {
+            Button { skip(by: -5) } label: {
+                Image(systemName: "gobackward.5").frame(width: 14)
+            }
+            .buttonStyle(PressableStyle())
+            .help("Back five seconds")
+
             Button(action: togglePlayback) {
                 HStack(spacing: 6) {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
-                        .contentTransition(.symbolEffect(.replace))
-                    Text(isPlaying ? "Playing" : "Paused")
-                        .contentTransition(.opacity)
+                    Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(width: 9)
+                    Text(model.isPlaying ? "Playing" : "Paused")
+                        .fixedSize()
+                        .frame(width: 46, alignment: .leading)
                 }
-                .captionType()
-                .foregroundStyle(.white.opacity(0.85))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(.ultraThinMaterial, in: Capsule())
                 .contentShape(Capsule())
             }
             .buttonStyle(PressableStyle())
             .help("Play or pause the preview (Space)")
-            .padding(Space.l)
-            .animation(Motion.hover, value: isPlaying)
+
+            Button { skip(by: 5) } label: {
+                Image(systemName: "goforward.5").frame(width: 14)
+            }
+            .buttonStyle(PressableStyle())
+            .help("Forward five seconds")
         }
-        .animation(Motion.enter(reduce), value: didLoad)
+        .captionType()
+        .foregroundStyle(.white.opacity(0.85))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .chrome(Capsule(), material: .ultraThinMaterial,
+                solid: Color(red: 0.11, green: 0.11, blue: 0.12))
+        .padding(Space.l)
+    }
+
+    private var historyControls: some View {
+        HStack(spacing: Space.xs) {
+            Button { if model.undo() { scheduleRebuild() } } label: {
+                Image(systemName: "arrow.uturn.backward").frame(width: 14)
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(!model.canUndo)
+            .opacity(model.canUndo ? 1 : 0.35)
+            .help("Undo (⌘Z)")
+
+            Button { if model.redo() { scheduleRebuild() } } label: {
+                Image(systemName: "arrow.uturn.forward").frame(width: 14)
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(!model.canRedo)
+            .opacity(model.canRedo ? 1 : 0.35)
+            .help("Redo (⇧⌘Z)")
+        }
+        .captionType()
+        .foregroundStyle(.white.opacity(0.85))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .chrome(Capsule(), material: .ultraThinMaterial,
+                solid: Color(red: 0.11, green: 0.11, blue: 0.12))
+        .padding(Space.l)
+    }
+
+    private var timelineBar: some View {
+        TimelineView(model: model, commit: commit, scrub: { scrub(toSourceTime: $0) })
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.m)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .overlay(alignment: .top) {
+                Rectangle().fill(Color.primary.opacity(0.10)).frame(height: 1)
+            }
     }
 
     // MARK: - Inspector
@@ -144,18 +292,15 @@ struct EditorView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: Space.xl) {
-                    backgroundSection.stagger(0, appeared: appeared, reduce: reduce)
-                    frameSection.stagger(1, appeared: appeared, reduce: reduce)
-                    motionSection.stagger(2, appeared: appeared, reduce: reduce)
-                    if duration > 0 {
-                        timingSection.stagger(3, appeared: appeared, reduce: reduce)
-                    }
-                    webcamSection.stagger(4, appeared: appeared, reduce: reduce)
-                    captionSection.stagger(5, appeared: appeared, reduce: reduce)
+                    sectionBody
                 }
                 .padding(.horizontal, Space.l)
                 .padding(.top, Space.l)
                 .padding(.bottom, Space.xl)
+                .stagger(0, appeared: appeared, reduce: reduce)
+                // A fresh identity per section means the scroll position resets when the
+                // section changes, instead of landing mid-way down unrelated content.
+                .id(model.section)
             }
             // Content passes under the header and the export bar, so both edges
             // get a soft fade rather than a hard rule.
@@ -165,15 +310,36 @@ struct EditorView: View {
             exportBar
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .overlay(alignment: .leading) {
-            Rectangle().fill(Color.primary.opacity(0.10)).frame(width: 1)
+    }
+
+    @ViewBuilder
+    private var sectionBody: some View {
+        switch model.section {
+        case .scene:       SceneSection(model: model, commit: commit)
+        case .clip:        ClipSection(model: model, commit: commit)
+        case .zoom:        ZoomSection(model: model, commit: commit)
+        case .cursor:      CursorSection(model: model, commit: commit)
+        case .webcam:      WebcamSection(model: model, commit: commit)
+        case .captions:    CaptionsSection(model: model, commit: commit, report: report)
+        case .annotations: AnnotationsSection(model: model, commit: commit)
+        case .audio:       AudioSection(model: model, commit: commit, audioTrackCount: audioTrackCount)
+        case .export:      ExportSection(model: model, commit: commit, report: report, sourceSize: sourceSize)
         }
     }
 
     private var inspectorHeader: some View {
         HStack {
             VStack(alignment: .leading, spacing: 1) {
-                Text("Polish").displayType()
+                HStack(spacing: 5) {
+                    Text(model.section.title).displayType()
+                    if model.isDirty {
+                        Circle()
+                            .fill(Palette.warning)
+                            .frame(width: 6, height: 6)
+                            .help("Unsaved changes")
+                            .accessibilityLabel("Unsaved changes")
+                    }
+                }
                 Text(sourceURL.lastPathComponent)
                     .captionType()
                     .foregroundStyle(.secondary)
@@ -181,6 +347,15 @@ struct EditorView: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: Space.s)
+
+            Button { showShortcuts = true } label: {
+                Image(systemName: "keyboard")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .buttonStyle(ActionButtonStyle(variant: .quiet, fullWidth: false))
+            .help("Keyboard shortcuts (⌘/)")
+            .accessibilityLabel("Keyboard shortcuts")
+
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .bold))
@@ -193,161 +368,6 @@ struct EditorView: View {
         .padding(.horizontal, Space.l)
         .padding(.top, Space.l)
         .padding(.bottom, Space.m)
-    }
-
-    // MARK: - Sections
-
-    private var backgroundSection: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            SectionHeader(title: "Background")
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Space.s), count: 3),
-                      spacing: Space.s) {
-                ForEach(presets.indices, id: \.self) { i in
-                    BackgroundSwatch(name: presets[i].0,
-                                     background: presets[i].1,
-                                     isSelected: presetIndex == i) {
-                        presetIndex = i
-                        style.background = presets[i].1
-                        Task { await rebuild() }
-                    }
-                }
-            }
-        }
-    }
-
-    private var frameSection: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            SectionHeader(title: "Frame")
-
-            ValueSlider(title: "Padding", value: $style.paddingFraction, range: 0...0.16,
-                        format: { String(format: "%.0f%%", $0 * 100) },
-                        onCommit: { Task { await rebuild() } })
-
-            ValueSlider(title: "Corner radius", value: $style.cornerRadiusFraction, range: 0...0.06,
-                        format: { String(format: "%.1f%%", $0 * 100) },
-                        onCommit: { Task { await rebuild() } })
-
-            ValueSlider(title: "Shadow", value: $style.shadowOpacity, range: 0...0.7,
-                        format: { String(format: "%.0f%%", $0 / 0.7 * 100) },
-                        onCommit: { Task { await rebuild() } })
-        }
-    }
-
-    private var motionSection: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            SectionHeader(title: "Motion")
-            ToggleRow(title: "Auto-zoom",
-                      subtitle: cursorTrack == nil
-                          ? "Needs cursor data — record in Reclip to enable."
-                          : "Eases into wherever the cursor is working.",
-                      isOn: $autoZoom,
-                      enabled: cursorTrack != nil,
-                      emphasis: .control) {
-                updateZoom()
-                Task { await rebuild() }
-            }
-        }
-    }
-
-    private var timingSection: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            VStack(alignment: .leading, spacing: Space.s) {
-                SectionHeader(title: "Trim",
-                              trailing: "\(timeLabel(trimStart)) – \(timeLabel(trimEnd))")
-                TrimBar(duration: duration,
-                        start: $trimStart,
-                        end: $trimEnd,
-                        playhead: playhead,
-                        onScrub: { scrub(toSourceTime: $0) }) {
-                    Task { await rebuild() }
-                }
-                Text("\(timeLabel(trimEnd - trimStart)) kept of \(timeLabel(duration))")
-                    .captionType()
-                    .foregroundStyle(.secondary)
-            }
-
-            SpeedControl(speed: $speed) { Task { await rebuild() } }
-        }
-    }
-
-    private var webcamSection: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            SectionHeader(title: "Webcam")
-            ToggleRow(title: "Webcam bubble",
-                      subtitle: webcamFrames.isEmpty ? "No webcam footage for this clip." : nil,
-                      isOn: $webcam.enabled,
-                      enabled: !webcamFrames.isEmpty,
-                      emphasis: .control) {
-                Task { await rebuild() }
-            }
-
-            if !webcamFrames.isEmpty && webcam.enabled {
-                VStack(alignment: .leading, spacing: Space.m) {
-                    HStack(alignment: .center, spacing: Space.m) {
-                        CornerPicker(corner: $webcam.corner) { Task { await rebuild() } }
-                        Text(webcam.corner.rawValue)
-                            .captionType()
-                            .foregroundStyle(.secondary)
-                        Spacer(minLength: 0)
-                    }
-
-                    ValueSlider(title: "Size", value: $webcam.sizeFraction, range: 0.12...0.35,
-                                format: { String(format: "%.0f%%", $0 * 100) },
-                                onCommit: { Task { await rebuild() } })
-                }
-                .transition(.rise(reduce, distance: 6))
-            }
-        }
-        .animation(Motion.move(reduce), value: webcam.enabled)
-    }
-
-    private var captionSection: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            SectionHeader(title: "Captions",
-                          trailing: annotations.isEmpty ? nil : "\(annotations.count)")
-
-            HStack(spacing: Space.s) {
-                TextField("Caption at \(timeLabel(playhead))", text: $newCaption)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($captionFocused)
-                    .onSubmit(addCaption)
-                Button("Add", action: addCaption)
-                    .buttonStyle(ActionButtonStyle(variant: .secondary, fullWidth: false))
-                    .disabled(newCaption.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-
-            VStack(spacing: Space.xs) {
-                ForEach(annotations) { a in
-                    HStack(spacing: Space.s) {
-                        Text(timeLabel(a.start))
-                            .captionType()
-                            .monospacedDigit()
-                            .foregroundStyle(Palette.accent)
-                        Text(a.text)
-                            .captionType()
-                            .lineLimit(1)
-                        Spacer(minLength: 0)
-                        Button {
-                            withAnimation(Motion.enter(reduce)) {
-                                annotations.removeAll { $0.id == a.id }
-                            }
-                            Task { await rebuild() }
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 10, weight: .semibold))
-                        }
-                        .buttonStyle(ActionButtonStyle(variant: .quiet, fullWidth: false))
-                        .help("Delete this caption")
-                        .accessibilityLabel("Delete caption \(a.text)")
-                    }
-                    .padding(.vertical, 4)
-                    .padding(.horizontal, Space.s)
-                    .background(Color.primary.opacity(0.05),
-                                in: RoundedRectangle(cornerRadius: Radius.inset, style: .continuous))
-                    .transition(.row(reduce))
-                }
-            }
-        }
     }
 
     // MARK: - Export bar
@@ -370,7 +390,7 @@ struct EditorView: View {
                             .monospacedDigit()
                     }
                 } else {
-                    Label("Export MP4", systemImage: "square.and.arrow.up")
+                    Label("Export \(model.format.rawValue)", systemImage: model.format.symbol)
                 }
             }
             .buttonStyle(ActionButtonStyle(variant: .prominent))
@@ -382,51 +402,51 @@ struct EditorView: View {
                     .transition(.opacity)
             }
 
-            HStack(spacing: Space.s) {
-                Button { Task { await export(asGif: true) } } label: {
-                    Label("GIF", systemImage: "photo.stack")
+            if let exportedURL {
+                Button { NSWorkspace.shared.activateFileViewerSelecting([exportedURL]) } label: {
+                    Label("Reveal in Finder", systemImage: "folder")
                 }
                 .buttonStyle(ActionButtonStyle(variant: .secondary))
-                .disabled(isExporting)
-
-                if let exportedURL {
-                    Button { NSWorkspace.shared.activateFileViewerSelecting([exportedURL]) } label: {
-                        Label("Reveal", systemImage: "folder")
-                    }
-                    .buttonStyle(ActionButtonStyle(variant: .secondary))
-                    .transition(.rise(reduce, distance: 4))
-                }
+                .transition(.rise(reduce, distance: 4))
             }
         }
         .padding(Space.l)
-        .background(.regularMaterial)
+        .chrome(Rectangle(), solid: Color(nsColor: .windowBackgroundColor))
         .animation(Motion.enter(reduce), value: isExporting)
         .animation(Motion.enter(reduce), value: status)
         .animation(Motion.enter(reduce), value: exportedURL)
         .animation(Motion.progress, value: exportProgress)
     }
 
-    // MARK: - Composition
+    // MARK: - Lifecycle
 
-    private func updateZoom() {
-        guard autoZoom, let track = cursorTrack, duration > 0 else {
-            zoom = ZoomTimeline()
-            return
-        }
-        zoom = ZoomTimeline.autoZoom(from: track, duration: duration)
+    private func report(_ kind: FeedbackKind, _ message: String) {
+        status = Status(kind, message)
     }
 
     private func firstLoad() async {
-        cursorTrack = CursorTrack.load(besides: sourceURL)
-        if !webcamLoaded {
-            webcamFrames = await WebcamOverlay.load(for: sourceURL)
-            webcamLoaded = true
+        model.cursorTrack = CursorTrack.load(besides: sourceURL)
+        model.webcamFrames = await WebcamOverlay.load(for: sourceURL)
+
+        let asset = AVURLAsset(url: sourceURL)
+        model.duration = (try? await asset.load(.duration))?.seconds ?? 0
+        if model.trimEnd == 0 { model.trimEnd = model.duration }
+        audioTrackCount = (try? await asset.loadTracks(withMediaType: .audio))?.count ?? 0
+        if let v = try? await asset.loadTracks(withMediaType: .video).first,
+           let natural = try? await v.load(.naturalSize),
+           let transform = try? await v.load(.preferredTransform) {
+            let r = natural.applying(transform)
+            sourceSize = CGSize(width: abs(r.width), height: abs(r.height))
         }
-        if duration == 0 {
-            let asset = AVURLAsset(url: sourceURL)
-            duration = (try? await asset.load(.duration))?.seconds ?? 0
-            if trimEnd == 0 { trimEnd = duration }
+
+        // Reopening a clip that was edited before should land back on that edit.
+        if model.hasProjectOnDisk {
+            try? model.loadProject()
+            // The project may point at footage other than the clip's own sidecar.
+            if model.webcam.sourcePath != nil { await model.reloadWebcamFrames() }
         }
+        model.beginHistory()
+
         observePlayhead()
         await rebuild()
         didLoad = true
@@ -435,25 +455,34 @@ struct EditorView: View {
 
     private func togglePlayback() {
         if player.rate > 0 { player.pause() } else { player.play() }
-        isPlaying = player.rate > 0
+        model.isPlaying = player.rate > 0
     }
 
-    /// Drives the preview from a trim handle while it is being dragged. Seeking
-    /// is cheap; rebuilding the composition is not — so the frame follows the
-    /// grip continuously and the render waits for the release.
+    private func skip(by seconds: Double) {
+        let target = player.currentTime().seconds + seconds
+        Task { @MainActor in
+            await player.seek(to: CMTime(seconds: max(0, target), preferredTimescale: 600),
+                              toleranceBefore: .zero, toleranceAfter: .zero)
+        }
+    }
+
+    /// Drives the preview from a timeline scrub. Seeking is cheap; rebuilding the
+    /// composition is not — so the frame follows the pointer continuously and the render
+    /// waits for the release.
     private func scrub(toSourceTime source: Double) {
         player.pause()
-        isPlaying = false
+        model.isPlaying = false
+        model.playhead = source
         // The composition starts at the trim-in point, so source time has to be
         // mapped back into the output timeline the player is actually running.
-        let out = max(source - trimStart, 0) / max(speed, 0.01)
+        let out = max(source - model.trimStart, 0) / max(model.speed, 0.01)
         Task { @MainActor in
             await player.seek(to: CMTime(seconds: out, preferredTimescale: 600),
                               toleranceBefore: .zero, toleranceAfter: .zero)
         }
     }
 
-    /// Playback position, mapped back into source time so the trim bar's
+    /// Playback position, mapped back into source time so the timeline's
     /// playhead stays truthful under trim and speed changes.
     private func observePlayhead() {
         guard timeObserver == nil else { return }
@@ -463,9 +492,26 @@ struct EditorView: View {
         ) { time in
             let out = time.seconds
             guard out.isFinite else { return }
-            playhead = trimStart + out * speed
+            model.playhead = model.trimStart + out * model.speed
             let running = player.rate > 0
-            if running != isPlaying { isPlaying = running }
+            if running != model.isPlaying { model.isPlaying = running }
+        }
+    }
+
+    /// Records the edit for undo, then rebuilds the preview.
+    private func commit() {
+        model.record()
+        scheduleRebuild()
+    }
+
+    /// Coalesces rebuild requests: a slider drag commits on release, but colour wells and
+    /// steppers can fire in bursts, and each rebuild reconstructs the whole composition.
+    private func scheduleRebuild() {
+        rebuildTask?.cancel()
+        rebuildTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(90))
+            guard !Task.isCancelled else { return }
+            await rebuild()
         }
     }
 
@@ -476,14 +522,18 @@ struct EditorView: View {
         let resumeAt = player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0
 
         do {
-            updateZoom()
             let tl = try await StyledExport.makeTimeline(
-                source: sourceURL, style: style, zoom: zoom, webcam: webcamFrames, webcamSettings: webcam,
-                annotations: annotations, trim: currentTrim(), speed: speed)
+                source: sourceURL, style: model.style, zoom: model.zoom,
+                webcam: model.webcamFrames, webcamSettings: model.webcam,
+                annotations: model.annotations, trim: model.trimRange(), speed: model.speed,
+                speedRegions: model.speedRegions,
+                cursor: model.cursorTrack, cursorStyle: model.cursorStyle,
+                captions: model.captionCues, captionSettings: model.captionSettings)
             let size = tl.video.renderSize
             if size.width > 0, size.height > 0 { previewAspect = size.width / size.height }
             let item = AVPlayerItem(asset: tl.asset)
             item.videoComposition = tl.video
+            item.audioMix = tl.audioMix
             player.replaceCurrentItem(with: item)
 
             let target = min(max(resumeAt, 0), max(tl.duration - 0.05, 0))
@@ -496,52 +546,55 @@ struct EditorView: View {
         }
     }
 
-    /// Trim range in SOURCE time, or nil if the whole clip is used.
-    private func currentTrim() -> CMTimeRange? {
-        guard duration > 0, (trimStart > 0.05 || trimEnd < duration - 0.05) else { return nil }
-        return CMTimeRange(start: CMTime(seconds: trimStart, preferredTimescale: 600),
-                           duration: CMTime(seconds: trimEnd - trimStart, preferredTimescale: 600))
-    }
+    // MARK: - Export
 
-    private func addCaption() {
-        let text = newCaption.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty else { return }
-        // Player time is OUTPUT time; convert to SOURCE time so captions stay in sync with trim/speed.
-        let outNow = player.currentTime().seconds
-        let out = outNow.isFinite ? outNow : 0
-        let srcStart = trimStart + out * speed
-        withAnimation(Motion.enter(reduce)) {
-            annotations.append(Annotation(text: text, start: srcStart, end: srcStart + 3))
-        }
-        newCaption = ""
-        Task { await rebuild() }
-    }
-
-    private func timeLabel(_ t: Double) -> String {
-        let s = Int(max(t, 0).rounded())
-        return String(format: "%d:%02d", s / 60, s % 60)
-    }
-
-    private func export(asGif: Bool = false) async {
+    private func export() async {
         isExporting = true
         exportProgress = nil
         exportedURL = nil
-        status = Status(.status, asGif ? "Rendering GIF…" : "Rendering MP4…")
+        let isGif = model.format == .gif
+        status = Status(.status, isGif ? "Rendering GIF…" : "Rendering MP4…")
         let out = sourceURL.deletingPathExtension()
-            .appendingPathExtension(asGif ? "styled.gif" : "styled.mp4")
-        let trim = currentTrim()
+            .appendingPathExtension(isGif ? "styled.gif" : "styled.mp4")
+        let trim = model.trimRange()
         let report: @Sendable (Double) -> Void = { value in
             Task { @MainActor in exportProgress = value }
         }
         do {
-            if asGif {
-                try await GifExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
-                                           trim: trim, webcam: webcamFrames, webcamSettings: webcam,
-                                           annotations: annotations, speed: speed, progress: report)
+            if isGif {
+                try await GifExport.export(source: sourceURL, to: out, style: model.style,
+                                           zoom: model.zoom, trim: trim,
+                                           webcam: model.webcamFrames, webcamSettings: model.webcam,
+                                           annotations: model.annotations, speed: model.speed,
+                                           fps: model.gifFPS, maxWidth: model.gifSize.maxWidth,
+                                           loop: model.gifLoop, bounce: model.gifBounce,
+                                           progress: report)
+            } else if model.motionBlurAmount > 0.01 || model.frameRate != .fps30 || model.encoding != .quality {
+                // The re-encode path is the only one that can set frame rate, bitrate and
+                // motion blur, so it is used whenever any of those is not at its default.
+                try await StyledExport.exportReencoded(
+                    source: sourceURL, to: out, style: model.style, zoom: model.zoom, trim: trim,
+                    webcam: model.webcamFrames, webcamSettings: model.webcam,
+                    annotations: model.annotations, speed: model.speed,
+                    quality: model.quality, encoding: model.encoding, frameRate: model.frameRate,
+                    motionBlur: model.motionBlurAmount,
+                    cursor: model.cursorTrack, cursorStyle: model.cursorStyle,
+                    captions: model.captionCues, captionSettings: model.captionSettings,
+                    progress: report)
             } else {
-                try await StyledExport.export(source: sourceURL, to: out, style: style, zoom: zoom,
-                                              trim: trim, webcam: webcamFrames, webcamSettings: webcam,
-                                              annotations: annotations, speed: speed, progress: report)
+                try await StyledExport.export(source: sourceURL, to: out, style: model.style,
+                                              zoom: model.zoom, trim: trim,
+                                              webcam: model.webcamFrames, webcamSettings: model.webcam,
+                                              annotations: model.annotations, speed: model.speed,
+                                              speedRegions: model.speedRegions,
+                                              quality: model.quality,
+                                              cursor: model.cursorTrack, cursorStyle: model.cursorStyle,
+                                              captions: model.captionCues,
+                                              captionSettings: model.captionSettings,
+                                              progress: report)
+            }
+            if model.writeCaptionSidecars, !model.captionCues.isEmpty {
+                writeSidecars(besides: out)
             }
             exportedURL = out
             status = Status(.success, "Saved \(out.lastPathComponent)")
@@ -550,5 +603,13 @@ struct EditorView: View {
         }
         isExporting = false
         exportProgress = nil
+    }
+
+    private func writeSidecars(besides output: URL) {
+        let base = output.deletingPathExtension()
+        try? CaptionExport.srt(model.captionCues)
+            .write(to: base.appendingPathExtension("srt"), atomically: true, encoding: .utf8)
+        try? CaptionExport.vtt(model.captionCues)
+            .write(to: base.appendingPathExtension("vtt"), atomically: true, encoding: .utf8)
     }
 }
