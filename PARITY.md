@@ -85,7 +85,7 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 | Roundness | ✅ | batch 1 |
 | Shadow | ✅ | batch 1 |
 | Margin | ✅ | batch 1 |
-| **React-to-zoom scaling** | ❌ | — |
+| **React-to-zoom scaling** | ✅ | bubble scales with ZoomTimeline zoom; tested |
 | **Independent width + height** | ✅ | WebcamSettings.aspectRatio |
 | **9-cell position + custom X/Y** | ✅ | full 9-cell grid (custom X/Y still open) |
 | **Crop control** | ✅ | `cropZoom` (1–3x) + `cropOffsetX/Y` pan; tested |
