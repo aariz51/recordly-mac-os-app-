@@ -90,7 +90,7 @@ the render/capture path; more cursor styles, loop mode, and motion presets remai
 | **9-cell position + custom X/Y** | ✅ | full 9-cell grid (custom X/Y still open) |
 | **Crop control** | ✅ | `cropZoom` (1–3x) + `cropOffsetX/Y` pan; tested |
 | **Upload / replace / remove footage** | ❌ | live only |
-| **Time-offset alignment** | ❌ | — |
+| **Time-offset alignment** | ✅ | `timeOffset` shifts webcam vs screen; tested |
 
 ## 6. Backgrounds / frame
 | Feature | Reclip | Note |
