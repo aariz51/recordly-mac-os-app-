@@ -61,7 +61,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Feature | Reclip | Note |
 |---|---|---|
 | Text captions | ✅ | Annotations |
-| **Text typography (weight/color/bg toggle+color)** | ✅ | weight, text colour, pill on/off + colour (font-family/align still fixed) |
+| **Text typography (font/weight/color/bg)** | ✅ | custom font family + weight + text colour + pill on/off/colour (Google-Fonts fetch is web-only; alignment single-line) |
 | Image annotations | ✅ | Annotation.kind=.image (+ fade in/out) |
 | Arrow annotations (stroke, color, 8-dir) | ✅ | Annotation.kind=.arrow + arrowAngle (any direction) |
 | Blur / censor region | ✅ | Annotation.kind=.blur/.box |
