@@ -328,7 +328,8 @@ enum StyledExport {
             // space so crop/zoom carry them.
             let lit = CursorRenderer.applySpotlight(on: request.sourceImage, track: cursor,
                                                     time: srcT, style: cursorStyle)
-            let withCursor = CursorRenderer.draw(on: lit, track: cursor,
+            let clicked = CursorRenderer.drawClicks(on: lit, track: cursor, time: srcT, style: cursorStyle)
+            let withCursor = CursorRenderer.draw(on: clicked, track: cursor,
                                                  time: srcT, style: cursorStyle)
             let frame = applyCrop(withCursor, crop)
             // Background is either the static solid/gradient, or a blurred fill of the frame.

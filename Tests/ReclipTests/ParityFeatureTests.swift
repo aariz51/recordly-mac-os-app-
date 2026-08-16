@@ -190,6 +190,35 @@ final class ParityFeatureTests: XCTestCase {
         XCTAssertTrue(CursorStyle.Kind.allCases.contains(.system))
     }
 
+    func testCursorClickRippleRenders() {
+        // A dark base; a click at t=0.5 with the cursor at center. Shortly after, a ripple
+        // ring should brighten pixels away from center (the expanding ring), not at center.
+        let base = CIImage(color: CIColor(red: 0.1, green: 0.1, blue: 0.1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 300, height: 300))
+        var track = CursorTrack()
+        track.samples = [CursorSample(t: 0, x: 0.5, y: 0.5), CursorSample(t: 1, x: 0.5, y: 0.5)]
+        track.clicks = [0.5]
+        var cs = CursorStyle(); cs.enabled = true; cs.showClicks = true; cs.size = 2.0
+        let atClick = CursorRenderer.drawClicks(on: base, track: track, time: 0.62, style: cs)   // ~120ms after
+        let noClick = CursorRenderer.drawClicks(on: base, track: track, time: 5.0, style: cs)    // long after → nothing
+
+        let ctx = CIContext()
+        func luma(_ img: CIImage, _ x: Int, _ y: Int) -> Int {
+            var px = [UInt8](repeating: 0, count: 4)
+            ctx.render(img, toBitmap: &px, rowBytes: 4, bounds: CGRect(x: x, y: y, width: 1, height: 1),
+                       format: .RGBA8, colorSpace: CGColorSpaceCreateDeviceRGB())
+            return Int(px[0])
+        }
+        // The ripple ring lands away from the exact center; find the brightest ring pixel on a scan line.
+        var maxRing = 0
+        for x in 150..<210 { maxRing = max(maxRing, luma(atClick, x, 150)) }
+        XCTAssertGreaterThan(maxRing, 60, "a click ripple ring brightens the frame near the cursor")
+        // Long after the click, the frame is untouched (back to dark).
+        var maxLater = 0
+        for x in 150..<210 { maxLater = max(maxLater, luma(noClick, x, 150)) }
+        XCTAssertLessThan(maxLater, 40, "no ripple long after the click")
+    }
+
     func testCursorSpotlightDimsAwayFromCursor() {
         // Bright base; cursor at center. Spotlight should darken the corner but keep center bright.
         let base = CIImage(color: CIColor(red: 0.8, green: 0.8, blue: 0.8))

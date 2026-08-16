@@ -50,6 +50,7 @@ struct ReclipProject: Codable, Equatable {
         var spotlight = false
         var spotlightRadius = 0.18
         var spotlightDim = 0.55
+        var showClicks = true
     }
     struct CueDTO: Codable, Equatable { var text: String; var start: Double; var end: Double }
 
@@ -150,7 +151,7 @@ struct ReclipProject: Codable, Equatable {
                     arrowAngle: $0.arrowAngle, fadeDuration: $0.fadeDuration)
             },
             cursor: CursorDTO(enabled: cursorStyle.enabled, kind: cursorStyle.kind.rawValue, size: cursorStyle.size,
-                              spotlight: cursorStyle.spotlight, spotlightRadius: cursorStyle.spotlightRadius, spotlightDim: cursorStyle.spotlightDim),
+                              spotlight: cursorStyle.spotlight, spotlightRadius: cursorStyle.spotlightRadius, spotlightDim: cursorStyle.spotlightDim, showClicks: cursorStyle.showClicks),
             captionCues: captionCues.map { CueDTO(text: $0.text, start: $0.start, end: $0.end) },
             captionsEnabled: captionsEnabled,
             trimStart: trimStart, trimEnd: trimEnd, speed: speed, speedRegions: speedRegions,
@@ -234,6 +235,7 @@ struct ReclipProject: Codable, Equatable {
         cs.spotlight = cursor.spotlight
         cs.spotlightRadius = cursor.spotlightRadius
         cs.spotlightDim = cursor.spotlightDim
+        cs.showClicks = cursor.showClicks
         return cs
     }
 

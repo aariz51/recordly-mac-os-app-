@@ -32,6 +32,7 @@ struct CursorStyle: Equatable {
     var spotlight = false          // dim everything except a soft circle around the cursor
     var spotlightRadius = 0.18     // circle radius as a fraction of the frame's short side
     var spotlightDim = 0.55        // how much to darken outside the circle (0…1)
+    var showClicks = true          // draw an expanding ripple at each recorded click
 }
 
 enum CursorRenderer {
@@ -64,6 +65,45 @@ enum CursorRenderer {
         blend.backgroundImage = dark      // dimmed outside
         blend.maskImage = mask
         return (blend.outputImage ?? image).cropped(to: ext)
+    }
+
+    /// Draws an expanding, fading ring at each recent click (Recordly's click ripple), using
+    /// the unit-tested CursorClickEffect timing. Positioned at the cursor location of the click.
+    static func drawClicks(on image: CIImage, track: CursorTrack?, time: Double, style: CursorStyle) -> CIImage {
+        guard style.enabled, style.showClicks, let track, !track.clicks.isEmpty else { return image }
+        let ext = image.extent
+        guard ext.width > 0, ext.height > 0 else { return image }
+        let bounceDur = 200.0, effectDur = 500.0
+        let maxR = min(ext.width, ext.height) * 0.06 * CGFloat(max(0.2, min(style.size, 6)))
+        var result = image
+        for clickT in track.clicks {
+            let rp = CursorClickEffect.rippleProgress(ageMs: (time - clickT) * 1000,
+                                                      bounceDurationMs: bounceDur, effectDurationMs: effectDur)
+            guard rp > 0.01, let pos = track.interpolated(at: clickT) else { continue }
+            let px = ext.minX + CGFloat(min(max(pos.x, 0), 1)) * ext.width
+            let py = ext.minY + (1 - CGFloat(min(max(pos.y, 0), 1))) * ext.height
+            let radius = maxR * CGFloat(2 - rp)          // expands as it fades
+            if let ring = makeRipple(radius: radius, opacity: rp) {
+                let s = ring.extent
+                result = ring.transformed(by: CGAffineTransform(translationX: px - s.width / 2,
+                                                                y: py - s.height / 2)).composited(over: result)
+            }
+        }
+        return result
+    }
+
+    private static func makeRipple(radius: CGFloat, opacity: Double) -> CIImage? {
+        let d = Int(ceil(radius * 2)) + 4
+        guard d > 4,
+              let ctx = CGContext(data: nil, width: d, height: d, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.setShouldAntialias(true)
+        let lw = max(1, radius * 0.12)
+        ctx.setStrokeColor(CGColor(red: 1, green: 1, blue: 1, alpha: max(0, min(opacity, 1))))
+        ctx.setLineWidth(lw)
+        ctx.strokeEllipse(in: CGRect(x: lw, y: lw, width: CGFloat(d) - lw * 2, height: CGFloat(d) - lw * 2))
+        return ctx.makeImage().map { CIImage(cgImage: $0) }
     }
 
     /// Composites the stylized cursor onto the (uncropped, unzoomed) source frame so it

@@ -11,6 +11,7 @@ struct CursorSample: Codable {
 /// Recorded cursor path for a clip, persisted as a sidecar JSON next to the MP4.
 struct CursorTrack: Codable {
     var samples: [CursorSample] = []
+    var clicks: [Double] = []      // timestamps (seconds) of mouse-down events
 
     static func sidecarURL(for movie: URL) -> URL {
         movie.deletingPathExtension().appendingPathExtension("cursor.json")
@@ -56,6 +57,7 @@ struct CursorTrack: Codable {
 final class CursorSampler {
     private var timer: Timer?
     private var startedAt: Date?
+    private var clickMonitor: Any?
     private(set) var track = CursorTrack()
 
     func start() {
@@ -64,11 +66,19 @@ final class CursorSampler {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.sample() }
         }
+        // Record click timestamps globally (for click-ripple rendering).
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let startedAt = self.startedAt else { return }
+                self.track.clicks.append(Date().timeIntervalSince(startedAt))
+            }
+        }
     }
 
     func stop() -> CursorTrack {
         timer?.invalidate()
         timer = nil
+        if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
         return track
     }
 
