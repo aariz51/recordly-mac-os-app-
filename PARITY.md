@@ -18,7 +18,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Full display capture | ✅ | ScreenRecorder — **end-to-end verified on-device** (real 3s recording → valid MP4); fixed a frame-status bug that was producing damaged files |
 | Multi-monitor selection | ✅ | availableDisplays |
 | Single-window capture | ✅ | CaptureSource.window |
-| Own-window exclusion | 🟡 | not filtered |
+| Own-window exclusion | ✅ | SCContentFilter excludes Reclip's own windows by bundle id; verified no capture regression |
 | Source thumbnails + app icons | ❌ | picker is text-only |
 | Native backend (mac SCK) | ✅ | ScreenCaptureKit |
 | Target 60fps / retina | ✅ | config |
