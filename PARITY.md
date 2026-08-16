@@ -46,7 +46,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Feature | Reclip | Note |
 |---|---|---|
 | Trim | ✅ | StyledExport trim |
-| **Split clip** | ❌ | — |
+| **Split clip / remove segment** | ✅ | `keepRanges` concatenates kept source ranges (CutMap-synced overlays); duration-verified |
 | **Clip model (per-clip speed grid, mute, volume, normalize)** | 🟡 | speed regions + mute + volume landed; split/normalize open |
 | **Undo / redo** | ✅ | `EditorHistory` — bounded 100-entry stack, redo-clear on new edit, initialized/applied/unchanged/recorded results; unit-tested (UI keybinding pending) |
 | **Drag/resize regions on a timeline** | ❌ | UI (UI dev) |
