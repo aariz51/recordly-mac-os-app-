@@ -163,6 +163,32 @@ final class AnnotationFadeTests: XCTestCase {
     }
 }
 
+final class AudioRoutingTests: XCTestCase {
+    func testClampGain() {
+        XCTAssertEqual(AudioRouting.clampGain(1.5, max: 2), 1.5, accuracy: 1e-9)
+        XCTAssertEqual(AudioRouting.clampGain(3.0, max: 2), 2.0, accuracy: 1e-9)   // capped
+        XCTAssertEqual(AudioRouting.clampGain(-1, max: 2), 0.0, accuracy: 1e-9)    // floored
+        XCTAssertEqual(AudioRouting.clampGain(.nan, max: 2), 1.0, accuracy: 1e-9)  // NaN → 1
+    }
+
+    func testEffectiveGainCombinesTrackAndMaster() {
+        var r = AudioRouting(); r.micGain = 1.5; r.masterGain = 0.8
+        XCTAssertEqual(r.effectiveGain(for: .mic), 1.5 * 0.8, accuracy: 1e-9)
+        // Track gain clamps to 2, master to 1.
+        r.systemGain = 5; r.masterGain = 2
+        XCTAssertEqual(r.effectiveGain(for: .system), 2.0 * 1.0, accuracy: 1e-9)
+        // Disabled → 0.
+        r.micEnabled = false
+        XCTAssertEqual(r.effectiveGain(for: .mic), 0, accuracy: 1e-9)
+    }
+
+    func testRegionGain() {
+        XCTAssertEqual(AudioRouting.regionGain(volume: 0.5, normalize: false), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(AudioRouting.regionGain(volume: 1.0, normalize: true), 1.0, accuracy: 1e-9)  // 1.35 clamped to 1
+        XCTAssertEqual(AudioRouting.regionGain(volume: 0.5, normalize: true), 0.675, accuracy: 1e-9) // 0.5*1.35
+    }
+}
+
 final class MicProcessorTests: XCTestCase {
     private func rms(_ a: [Float]) -> Double { (a.reduce(0.0) { $0 + Double($1 * $1) } / Double(a.count)).squareRoot() }
 
