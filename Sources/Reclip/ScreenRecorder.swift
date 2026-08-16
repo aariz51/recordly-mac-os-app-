@@ -96,7 +96,11 @@ final class ScreenRecorder: NSObject, ObservableObject {
             guard let display = content.displays.first(where: { $0.displayID == id }) else {
                 throw RecorderError.noSource
             }
-            filter = SCContentFilter(display: display, excludingWindows: [])
+            // Exclude Reclip's own windows so the recorder UI never appears in the capture.
+            let ownWindows = content.windows.filter {
+                $0.owningApplication?.bundleIdentifier == Bundle.main.bundleIdentifier
+            }
+            filter = SCContentFilter(display: display, excludingWindows: ownWindows)
             pixelWidth = display.width * 2
             pixelHeight = display.height * 2
         case .window(let id):
