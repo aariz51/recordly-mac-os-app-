@@ -163,6 +163,44 @@ final class AnnotationFadeTests: XCTestCase {
     }
 }
 
+final class MicProcessorTests: XCTestCase {
+    private func rms(_ a: [Float]) -> Double { (a.reduce(0.0) { $0 + Double($1 * $1) } / Double(a.count)).squareRoot() }
+
+    func testHighPassAttenuatesLowFreqButPassesHigh() {
+        let sr = 44100.0, n = 8820
+        let low  = (0..<n).map { Float(sin(2 * .pi * 20 * Double($0) / sr)) }    // 20 Hz rumble
+        let high = (0..<n).map { Float(sin(2 * .pi * 4000 * Double($0) / sr)) }  // 4 kHz voice band
+        let lowF  = MicProcessor.highPass(low,  cutoff: 200, sampleRate: sr)
+        let highF = MicProcessor.highPass(high, cutoff: 200, sampleRate: sr)
+        XCTAssertLessThan(rms(lowF), rms(low) * 0.3, "20Hz strongly attenuated by a 200Hz high-pass")
+        XCTAssertGreaterThan(rms(highF), rms(high) * 0.7, "4kHz passes largely intact")
+    }
+
+    func testNoiseGateSilencesQuietSamples() {
+        let x: [Float] = [0.01, 0.5, -0.02, 0.8, 0.005, -0.6]
+        XCTAssertEqual(MicProcessor.noiseGate(x, threshold: 0.1), [0, 0.5, 0, 0.8, 0, -0.6])
+    }
+
+    func testVoiceProfilePCMRoundTrip() {
+        // Low-freq PCM → voice profile → less low-frequency energy.
+        let sr = 44100.0, n = 4410
+        var pcm = Data(count: n * 2)
+        pcm.withUnsafeMutableBytes { raw in
+            let p = raw.bindMemory(to: Int16.self)
+            for i in 0..<n { p[i] = Int16(sin(2 * .pi * 25 * Double(i) / sr) * 12000) }
+        }
+        let processed = MicProcessor.processPCM16(pcm, profile: .voice, sampleRate: sr)
+        XCTAssertEqual(processed.count, pcm.count)
+        func energy(_ d: Data) -> Double {
+            var s = 0.0; d.withUnsafeBytes { r in let p = r.bindMemory(to: Int16.self)
+                for v in p { s += Double(v) * Double(v) } }
+            return (s / Double(d.count / 2)).squareRoot()
+        }
+        XCTAssertLessThan(energy(processed), energy(pcm) * 0.5, "voice profile removes the low-freq rumble")
+        XCTAssertEqual(MicProfile.allCases.count, 3)
+    }
+}
+
 final class CutMapTests: XCTestCase {
     func testCutMapConcatenatesKeptRanges() {
         // Keep [0,2] and [5,8] of a 10s source (cut out [2,5] and [8,10]).
