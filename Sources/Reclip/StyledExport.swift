@@ -285,7 +285,8 @@ enum StyledExport {
                                    shadowRadius: style.shadowRadius,
                                    context: ciContext)
             let withCam = WebcamOverlay.composite(base: composed, canvas: canvas,
-                                                  webcam: webcam, time: srcT, settings: webcamSettings)
+                                                  webcam: webcam, time: srcT, settings: webcamSettings,
+                                                  zoomScale: z.scale)
             let withText = Annotations.composite(base: withCam, canvas: canvas,
                                                  rendered: renderedAnnotations, time: srcT)
             let withCaptions = CaptionRenderer.composite(base: withText, canvas: canvas,

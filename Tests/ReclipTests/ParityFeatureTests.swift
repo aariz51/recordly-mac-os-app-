@@ -364,6 +364,21 @@ final class ParityFeatureTests: XCTestCase {
         try await assertValid(out)
     }
 
+    func testWebcamReactToZoom() async throws {
+        // Direct check: with reactToZoom on, a zoomed frame yields a larger bubble than 1x.
+        // With reactToZoom, run the full export with a zoom region to exercise the scaling path.
+        let src = tmp("wcz2-src.mp4"); try await makeVideo(src)
+        let camURL = WebcamRecorder.sidecarURL(for: src); try await makeVideo(camURL, size: CGSize(width: 300, height: 300))
+        let frames = await WebcamOverlay.load(for: src)
+        XCTAssertFalse(frames.isEmpty)
+        var wc = WebcamSettings(); wc.enabled = true; wc.reactToZoom = true; wc.sizeFraction = 0.2
+        var z = ZoomTimeline(); z.addRegion(start: 0.2, end: 1.0, depth: .strong, focus: CGPoint(x: 0.5, y: 0.5))
+        let out = tmp("wcz2.mp4")
+        try await StyledExport.export(source: src, to: out, style: StyleOptions(), zoom: z,
+                                      webcam: frames, webcamSettings: wc)
+        try await assertValid(out)
+    }
+
     func testWebcamPanOffsetExports() async throws {
         let src = tmp("wcpan-src.mp4"); try await makeVideo(src)
         let cam = WebcamRecorder.sidecarURL(for: src)
