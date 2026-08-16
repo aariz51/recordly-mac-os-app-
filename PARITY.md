@@ -37,7 +37,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | **Floating HUD control bar** | ❌ | — |
 | Cursor position telemetry | ✅ | CursorSampler |
 | **Cursor click/interaction capture** | ❌ | position only |
-| **System cursor asset extraction** | ❌ | — |
+| **System cursor asset extraction** | ✅ | `SystemCursor` extracts real NSCursor image; `.system` cursor kind; tested |
 | Cursor show/hide | ✅ | showCursor (batch 1) |
 | **Crash recovery / validation / pruning** | ✅ | `RecordingValidator` validate + prune (empty/unreadable/orphaned sidecars); tested |
 | Permission pre-flight + prompts | ✅ | `PermissionStatus` reads screen/camera/mic TCC without prompting + screen-recording request; manually verified per-permission on-device |
