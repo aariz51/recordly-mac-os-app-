@@ -27,7 +27,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | Multi-monitor selection | ✅ | availableDisplays |
 | Single-window capture | ✅ | CaptureSource.window |
 | Own-window exclusion | ✅ | SCContentFilter excludes Reclip's own windows by bundle id; verified no capture regression |
-| Source thumbnails + app icons | ❌ | picker is text-only |
+| Source thumbnails + app icons | ✅ | `SourceThumbnails` — SCScreenshotManager stills per display/window + owning-app icon, cached by source id |
 | Native backend (mac SCK) | ✅ | ScreenCaptureKit |
 | Target 60fps / retina | ✅ | config |
 | **Pause / Resume recording** | ✅ | `RecordingClock` + frame-drop pause, wired into ScreenRecorder; **verified in a real recording** (integration test drives start→pause→resume→stop → valid video) |
@@ -42,7 +42,7 @@ against Reclip (our native Swift app). Based on a full source inventory, not the
 | **Separate mic/system routing (per-track + master gain)** | ✅ | `AudioRouting` model + export wiring (per-track gain via AVAudioMix); verified muting mic track on a 2-track source |
 | Webcam capture | ✅ | sidecar |
 | **Webcam device selection** | ✅ | `DeviceEnumerator.cameras()` + `webcamDeviceID`; manually verified (built-in + Continuity cameras found) |
-| Webcam live preview | ❌ | needs a capture-session preview layer (Recordly's floating preview) |
+| Webcam live preview | ✅ | `WebcamPreviewPanel` — floating always-on-top AVCaptureVideoPreviewLayer panel, excluded from the capture |
 | **Floating HUD control bar** | ❌ | — |
 | Cursor position telemetry | ✅ | CursorSampler |
 | **Cursor click/interaction capture** | ✅ | click timestamps captured; expanding ripple rendered (CursorClickEffect timing); pixel-verified |
@@ -91,7 +91,8 @@ it cannot carry state itself. Each frame then indexes a precomputed sample.
 | **Click bounce** | ✅ | sine dip about the hotspot, floored at 0.72 |
 | **Click effects (off/ripple/spotlight/echo)** | ✅ | + colour, size, opacity, duration |
 | Spotlight (dim around pointer) | ✅ | radius + dim amount |
-| Loop cursor | ❌ | Recordly replays the path past the end of the track |
+| Loop cursor | ✅ | `loopCursorPath` — replays the recorded path past the end of the track instead of parking the pointer |
+| **Cursor-follow camera** | ✅ | `CursorFollowCamera` (port of `cursorFollowCamera.ts`) — persistent zoom center, safe-zone hysteresis pan, zoom-out freeze, focus clamp; tested |
 | Extra cursor styles (Tahoe, Figma, …) | ❌ | third-party sprite assets, not portable
 
 ## 5. Webcam overlay
@@ -133,10 +134,15 @@ font family/size, colour, bottom offset, max width, box opacity/radius.
 **Entrance animations landed** (`CaptionAnimation`: off/fade/rise/pop + duration), each a
 smoothstep envelope over opacity/offset/scale, pixel-verified mid-transition and at rest.
 
-Still missing: karaoke word highlighting (`CaptionEditing.buildWords` is the tested
-foundation, but the *rendering* is unbuilt), and — for App Store — linking whisper.cpp as a
-library rather than shelling out to `whisper-cli`. The UI says so plainly when the binary
-isn't present rather than failing with a path error.
+**Karaoke word highlighting landed** — `CaptionEditing.buildWords` timings now drive an
+actual renderer: each word lights as it is spoken, with the cue's timing spread across its
+words. Toggle plus highlight colour in the Captions section. **`CaptionLayout`** (port of
+`captionLayout.ts`) adds the word-state layout — spoken/active/upcoming tagging + greedy
+line-wrapping + a rolling `maxRows` window that scrolls long captions; tested.
+
+Still missing: for App Store, linking whisper.cpp as a library rather than shelling out to
+`whisper-cli`. The UI says so plainly when the binary isn't present rather than failing with
+a path error.
 
 ## 7b. Extensions
 | Feature | Reclip | Note |
@@ -159,7 +165,7 @@ isn't present rather than failing with a path error.
 | GIF frame-rate (4) + size presets (3) | ✅ | GifSize presets + fps param |
 | Output dimension control | ✅ | aspect presets + `maxOutputHeight` resolution cap (1080/720/…); tested |
 | Reveal in Finder | ✅ | — |
-| Save dialog / Save-again / discard | 🟡 | writes beside the source and reveals in Finder; no Save-As panel |
+| Save dialog / Save-again / discard | ✅ | `askWhereToSave` NSSavePanel, or writes beside the source; reveals in Finder |
 | Export progress phases | ✅ | `ExportProgress` phase model (preparing/extracting/rendering/finalizing/saving) + `saving(previous:)`; unit-tested |
 
 ## 9. Platform / workflow
@@ -172,29 +178,60 @@ isn't present rather than failing with a path error.
 | **Shortcut reference sheet** | ✅ | ⌘/ — rendered from the live bindings, not a hand-written list |
 | Timeline core model | ✅ | `TimelineModel` — span overlap/clamp, playhead + axis formatting, track-row IDs |
 | Extension manifest + permission model | ✅ | `ExtensionManifest` + `ExtensionRegistry` |
-| Project browser / recents | ❌ | open-a-file only |
+| Project browser / recents | ✅ | `RecentProjects` — 8 most recent, de-duplicated, dead paths dropped on read; shown on the launch screen |
 | Autosave / crash recovery of edits | ❌ | saves are explicit |
-| Theme (light/dark/system) | 🟡 | follows the system automatically; no in-app override |
-| 9-locale i18n | ❌ | subsystem-scale; no string infrastructure yet |
+| Theme (light/dark/system) | ✅ | in-app override via `AppTheme`, applied through `NSApp.appearance` so AppKit panels follow too |
+| 9-locale i18n | ✅ | `Localization` + 9 `.lproj` tables (313 strings each); switching is instant, no relaunch |
 | Auto-update | ⛔ | App Store handles updates |
+
+### 9b. How the localization works
+The key *is* the English copy — `L("Start Recording")`, not `L("recorder.start")`. A missing
+entry therefore degrades to correct English rather than to a raw identifier, and the source
+stays readable without a lookup table.
+
+Lookup is owned rather than delegated to SwiftUI's `LocalizedStringKey`, for two reasons:
+SwiftUI resolves against a bundle the system picks, so an in-app switch would need a
+relaunch; and it never reaches the AppKit surfaces — the editor is an `NSHostingView` in an
+`NSWindow`, and the webcam preview is a plain `NSPanel`. `Localization` is an
+`ObservableObject`, and the two view trees carry `.id(loc.language)` so a switch rebuilds
+them — without it SwiftUI diffs the child structs as equal and leaves the old language
+onscreen.
+
+`.system` resolves against `Locale.preferredLanguages` with prefix matching, so `pt-PT` and
+`zh-Hant-HK` land on the right table instead of falling through to English.
+
+Coverage is enforced, not assumed: `LocalizationTests` scans the source and fails on any
+`Text`/`Button`/`Label`/`TextField`/`.help`/`.accessibilityLabel` literal that isn't wrapped
+in `L()`, and on any `L("…")` key missing from a table. The bundling is asserted too —
+`bundle.sh` copying the `.lproj` directories, and `CFBundleLocalizations` matching
+`AppLanguage`. Both were broken when the tables were first written, and nothing failed,
+because an unlocalized app is simply an English one.
 
 ---
 
 ## 10. What is genuinely still missing
 Everything else in this document is done. These are the honest remainders, with why:
 
-1. **Karaoke word highlighting** — timing math is ported and tested; the renderer isn't built.
-2. **Timeline zoom / pan** — lanes are fixed to the clip length, so long recordings get cramped.
-3. **Waveform in the timeline** — Recordly draws audio peaks under the clip.
-4. **Floating webcam preview while recording** — needs a capture-session preview layer.
-5. **Source thumbnails in the picker** — the source list is text-only.
-6. **Project browser / recents / autosave.**
-7. **i18n (9 locales)** — subsystem-scale, and no localization infrastructure exists yet.
-8. **Loop cursor + extra cursor styles** — the extra styles are third-party sprite assets.
-9. **Save-As panel** — exports write beside the source and reveal in Finder.
-10. **Extensions marketplace / remote-JS loading** — ⛔ deliberately out of scope: a native
-    App Store app cannot download and execute remote code (§2.5.2). The manifest, permission
-    model and render-hook runtime are implemented for built-in/curated extensions.
+Items 1–9 of the previous list are now built: karaoke word highlighting, timeline zoom/pan,
+the timeline waveform (`AudioPeaks`), the floating webcam preview, source thumbnails,
+recents, i18n, the loop cursor, and the Save-As panel. What remains:
+
+1. **Autosave / crash recovery** — saves are explicit (⌘S) and dirty state is tracked, but an
+   unsaved edit is still lost if the app dies. Recordly autosaves to local storage.
+2. **Extra cursor styles (Tahoe, Figma, …)** — the shipped styles are drawn; the rest are
+   third-party sprite assets that aren't redistributable here.
+3. **Floating HUD control bar while recording** — recording is driven from the main window
+   and the menu bar; Recordly has a separate always-on-top HUD.
+4. **whisper.cpp as a linked library** — transcription shells out to `whisper-cli`, which an
+   App Store sandbox won't allow. The UI states this plainly when the binary is absent.
+5. **Extensions marketplace / remote-JS loading** — ⛔ deliberately out of scope: a native
+   App Store app cannot download and execute remote code (§2.5.2). The manifest, permission
+   model and render-hook runtime are implemented for built-in/curated extensions.
+
+**Translation review is an open release gate.** The nine locale tables were machine-produced
+in-house, not by native speakers. The infrastructure is verified end to end; the *wording*
+has had no human review, and Korean, Russian and both Chinese variants should get a native
+read before shipping.
 
 ## Notes on fidelity
 Where Recordly's behaviour is a *web* behaviour, Reclip does the native equivalent rather
