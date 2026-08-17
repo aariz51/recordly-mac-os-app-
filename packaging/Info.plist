@@ -2,6 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <!-- Languages Reclip ships. Without CFBundleLocalizations the App Store lists the app
+         as English-only regardless of what is in Contents/Resources, and macOS will not
+         offer the app in the per-app language picker. Keep in step with AppLanguage. -->
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>es</string>
+        <string>fr</string>
+        <string>it</string>
+        <string>ko</string>
+        <string>nl</string>
+        <string>pt-BR</string>
+        <string>ru</string>
+        <string>zh-Hans</string>
+        <string>zh-Hant</string>
+    </array>
     <key>CFBundleName</key>
     <string>Reclip</string>
     <key>CFBundleDisplayName</key>
@@ -19,7 +37,7 @@
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSMinimumSystemVersion</key>
     <string>15.0</string>
     <key>NSHighResolutionCapable</key>
